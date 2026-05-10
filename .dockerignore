@@ -1,0 +1,28 @@
+# Build artifacts
+**/bin/
+**/obj/
+**/out/
+
+# IDE
+**/.vs/
+**/.idea/
+*.user
+
+# Tests
+**/TestResults/
+
+# Git
+**/.git/
+**/.gitignore
+**/.gitattributes
+
+# Docker
+**/Dockerfile
+**/.dockerignore
+
+# README e docs
+**/README*.md
+
+# Outros
+**/*.swp
+**/.DS_Store

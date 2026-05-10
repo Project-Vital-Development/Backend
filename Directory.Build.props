@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Propriedades aplicadas a TODOS os projetos do backend.
+       Centraliza configuração para evitar duplicação nos .csproj.
+       ───────────────────────────────────────────────────────────────────── -->
+
+  <PropertyGroup>
+    <!-- Desativa o resolver de workloads do MSBuild.
+         Necessário para contornar um manifesto de workload corrompido
+         no SDK 8.0.414 desta máquina (mono.toolchain.net6 → emscripten ausente).
+         Os workloads não são usados por nenhum projeto do Project Vital. -->
+    <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
+
+    <!-- Suprime warnings sobre versões "fora da prateleira" -->
+    <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
+  </PropertyGroup>
+
+</Project>
