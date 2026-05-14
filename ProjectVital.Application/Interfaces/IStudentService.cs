@@ -3,10 +3,6 @@ using ProjectVital.Application.Inputs;
 
 namespace ProjectVital.Application.Interfaces;
 
-/// <summary>
-/// Serviço de gestão de alunos. Aplica regras de tenant isolation
-/// (Manager só pode atuar sobre alunos da sua própria Academy).
-/// </summary>
 public interface IStudentService
 {
     Task<IReadOnlyList<StudentDto>> ListByAcademyAsync(
@@ -19,4 +15,6 @@ public interface IStudentService
     Task<StudentDto> RegisterAsync(RegisterStudentInput input, CancellationToken cancellationToken = default);
 
     Task<StudentDto> UpdateAsync(int id, UpdateStudentInput input, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 }

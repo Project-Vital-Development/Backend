@@ -1,4 +1,5 @@
 using HotChocolate;
+using ProjectVital.Domain.Exceptions;
 
 namespace ProjectVital.API.GraphQL.Errors;
 
@@ -13,12 +14,24 @@ public class AppErrorFilter : IErrorFilter
     {
         var mapped = error.Exception switch
         {
+            ForbiddenException => error
+                .WithCode("FORBIDDEN")
+                .WithMessage(error.Exception.Message),
+
             UnauthorizedAccessException => error
                 .WithCode("AUTH_FAILED")
                 .WithMessage(error.Exception.Message),
 
+            NotFoundException => error
+                .WithCode("NOT_FOUND")
+                .WithMessage(error.Exception.Message),
+
             KeyNotFoundException => error
                 .WithCode("NOT_FOUND")
+                .WithMessage(error.Exception.Message),
+
+            BusinessRuleException => error
+                .WithCode("BUSINESS_RULE_VIOLATION")
                 .WithMessage(error.Exception.Message),
 
             InvalidOperationException => error

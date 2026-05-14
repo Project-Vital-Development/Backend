@@ -1,5 +1,7 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using ProjectVital.API.GraphQL.Errors;
@@ -13,21 +15,19 @@ using ProjectVital.Domain.Interfaces;
 using ProjectVital.Infrastructure.Persistence;
 using ProjectVital.Infrastructure.Repositories;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FASE 2 — GraphQL + JWT + CORS + Services
-// ─────────────────────────────────────────────────────────────────────────────
-
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Logging estruturado ───────────────────────────────────────────────────────
+if (!builder.Environment.IsDevelopment())
+    builder.Logging.AddJsonConsole();
+
 // ── Connection string ─────────────────────────────────────────────────────────
-// Prioridade: env var > appsettings.Development.json
 var connectionString = builder.Configuration["DB_CONNECTION_STRING"]
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException(
         "Connection string ausente. Defina DB_CONNECTION_STRING no .env.");
 
 // ── JWT Secret ────────────────────────────────────────────────────────────────
-// NUNCA hardcodado — obrigatoriamente via variável de ambiente
 var jwtSecret = builder.Configuration["JWT_SECRET"]
     ?? throw new InvalidOperationException(
         "JWT_SECRET não configurado. Defina a variável de ambiente JWT_SECRET " +
@@ -76,7 +76,6 @@ builder.Services
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
             ValidateIssuer = false,
             ValidateAudience = false,
-            // Zero tolerância — token expirado é rejeitado imediatamente
             ClockSkew = TimeSpan.Zero
         };
     });
@@ -85,7 +84,6 @@ builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-// Origins lidas de appsettings — NUNCA usar AllowAnyOrigin() em produção
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>() ?? [];
@@ -95,37 +93,43 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Frontend", policy =>
     {
         if (allowedOrigins.Length > 0)
-        {
-            policy
-                .WithOrigins(allowedOrigins)
-                .AllowAnyHeader()
-                .AllowAnyMethod();
-        }
+            policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
         else
-        {
-            // Sem origins configuradas: bloqueia tudo (fail-safe para produção)
             policy.WithOrigins("https://configure-allowed-origins-in-env");
-        }
     });
+});
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────────
+builder.Services.AddRateLimiter(options =>
+{
+    // Limite geral por IP: 100 requests/min
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
 // ── Hot Chocolate — GraphQL Server ────────────────────────────────────────────
 builder.Services
     .AddGraphQLServer()
-    // Tipos raiz — resolvers são adicionados como extensões (ExtendObjectType)
     .AddQueryType(d => d.Name(OperationTypeNames.Query))
     .AddMutationType(d => d.Name(OperationTypeNames.Mutation))
-    // Query resolvers
     .AddTypeExtension<StudentQueryResolver>()
     .AddTypeExtension<CheckInQueryResolver>()
     .AddTypeExtension<PredictionQueryResolver>()
     .AddTypeExtension<KPIResolver>()
-    // Mutation resolvers
     .AddTypeExtension<AuthResolver>()
     .AddTypeExtension<StudentMutationResolver>()
     .AddTypeExtension<CheckInMutationResolver>()
     .AddTypeExtension<PredictionMutationResolver>()
-    // Tipos de output
     .AddType<StudentType>()
     .AddType<CheckInType>()
     .AddType<PredictionType>()
@@ -133,38 +137,28 @@ builder.Services
     .AddType<UserType>()
     .AddType<AuthPayloadType>()
     .AddType<RetrainResultType>()
-    // Integração com ASP.NET Core Authorization — lê HttpContext.User (JWT)
     .AddAuthorization()
-    // Filtro de erros: mapeia exceções para códigos GraphQL, remove stack traces
     .AddErrorFilter<AppErrorFilter>()
-    // Detalhes de exceção no payload apenas em desenvolvimento
+    // Bloqueia introspection em produção (SEC-02)
+    .AllowIntrospection(builder.Environment.IsDevelopment())
     .ModifyRequestOptions(opt =>
         opt.IncludeExceptionDetails = builder.Environment.IsDevelopment());
 
 // ── Health Check ──────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<ProjectVitalDbContext>("database");
-
-// ─────────────────────────────────────────────────────────────────────────────
+    .AddDbContextCheck<ProjectVitalDbContext>("mysql");
 
 var app = builder.Build();
 
 // ── Middleware pipeline — ORDEM É CRÍTICA ────────────────────────────────────
-// 1. CORS deve ser o primeiro para que preflight OPTIONS passe antes do JWT
 app.UseCors("Frontend");
-// 2. JWT: valida o Bearer token e popula HttpContext.User
+app.UseRateLimiter();
 app.UseAuthentication();
-// 3. Authorization: aplica políticas de autorização
 app.UseAuthorization();
 
-// ── Endpoints ─────────────────────────────────────────────────────────────────
-// GraphQL endpoint principal — todas as queries e mutations
 app.MapGraphQL("/graphql");
-
-// Health check para Docker Compose e load balancers
 app.MapHealthChecks("/health");
 
-// Interface visual do Banana Cake Pop apenas em desenvolvimento
 if (app.Environment.IsDevelopment())
     app.MapBananaCakePop("/graphql/ui");
 
@@ -190,12 +184,10 @@ static async Task SeedDevelopmentDataAsync(
     IAuthService auth,
     ILogger logger)
 {
-    // Só executa se não houver dados (idempotente)
     if (await db.Users.AnyAsync()) return;
 
     logger.LogInformation("Inserindo dados de seed para desenvolvimento...");
 
-    // Manager da academia de teste
     var manager = new User
     {
         Name = "Admin Teste",
@@ -207,7 +199,6 @@ static async Task SeedDevelopmentDataAsync(
     db.Users.Add(manager);
     await db.SaveChangesAsync();
 
-    // Academia vinculada ao manager
     var academy = new Academy
     {
         Name = "Academia Project Vital",
@@ -218,7 +209,6 @@ static async Task SeedDevelopmentDataAsync(
     db.Academies.Add(academy);
     await db.SaveChangesAsync();
 
-    // Plano básico
     var plan = new Plan
     {
         AcademyId = academy.Id,
@@ -229,7 +219,6 @@ static async Task SeedDevelopmentDataAsync(
     db.Plans.Add(plan);
     await db.SaveChangesAsync();
 
-    // 3 alunos de teste
     var alunoNames = new[] { ("João Silva", "joao@test.dev"), ("Maria Santos", "maria@test.dev"), ("Carlos Lima", "carlos@test.dev") };
     foreach (var (name, email) in alunoNames)
     {
@@ -255,7 +244,6 @@ static async Task SeedDevelopmentDataAsync(
         db.Students.Add(student);
         await db.SaveChangesAsync();
 
-        // Alguns check-ins para cada aluno
         var random = new Random(student.Id);
         for (int i = 0; i < 12; i++)
         {
@@ -268,7 +256,8 @@ static async Task SeedDevelopmentDataAsync(
     }
 
     await db.SaveChangesAsync();
+    // SEC-01: Nunca logar senha em texto plano — apenas email e academyId
     logger.LogInformation(
-        "Seed concluído. Manager: admin@projectvital.dev / Senha@123 | AcademyId={AcademyId}",
+        "Seed concluído. Manager: admin@projectvital.dev | AcademyId={AcademyId}",
         academy.Id);
 }

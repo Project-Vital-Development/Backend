@@ -1,18 +1,15 @@
-using System.Security.Claims;
 using HotChocolate;
 using HotChocolate.Authorization;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
+using ProjectVital.API.GraphQL.Helpers;
 using ProjectVital.Application.DTOs;
 using ProjectVital.Application.Inputs;
 using ProjectVital.Application.Interfaces;
+using ProjectVital.Domain.Exceptions;
 
 namespace ProjectVital.API.GraphQL.Resolvers;
 
-/// <summary>
-/// Queries de alunos. Manager só pode acessar alunos da sua própria academia.
-/// A validação do academyId do token é feita em cada método.
-/// </summary>
 [ExtendObjectType(OperationTypeNames.Query)]
 public class StudentQueryResolver
 {
@@ -23,7 +20,7 @@ public class StudentQueryResolver
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
-        EnforceAcademyAccess(httpContext.HttpContext!, academyId);
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, academyId);
         return await studentService.ListByAcademyAsync(academyId, null, cancellationToken);
     }
 
@@ -31,32 +28,18 @@ public class StudentQueryResolver
     public async Task<StudentDto?> StudentAsync(
         [ID] int id,
         [Service] IStudentService studentService,
+        [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
-        return await studentService.GetByIdAsync(id, cancellationToken);
-    }
+        var student = await studentService.GetByIdAsync(id, cancellationToken);
+        if (student is null) return null;
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Manager só pode acessar a própria academia.
-    /// Admin tem acesso irrestrito.
-    /// </summary>
-    private static void EnforceAcademyAccess(HttpContext context, int requestedAcademyId)
-    {
-        var role = context.User.FindFirst(ClaimTypes.Role)?.Value;
-        if (role == "Admin") return;
-
-        var academyIdClaim = context.User.FindFirst("academyId")?.Value;
-        if (academyIdClaim != requestedAcademyId.ToString())
-            throw new UnauthorizedAccessException(
-                "Acesso negado: você não tem permissão para acessar esta academia.");
+        // Verifica que o aluno pertence à academia do token (CRIT-01)
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, student.AcademyId);
+        return student;
     }
 }
 
-/// <summary>
-/// Mutations de alunos. Manager só pode registrar alunos na própria academia.
-/// </summary>
 [ExtendObjectType(OperationTypeNames.Mutation)]
 public class StudentMutationResolver
 {
@@ -67,7 +50,7 @@ public class StudentMutationResolver
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
-        EnforceAcademyAccess(httpContext.HttpContext!, input.AcademyId);
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, input.AcademyId);
         return await studentService.RegisterAsync(input, cancellationToken);
     }
 
@@ -76,19 +59,29 @@ public class StudentMutationResolver
         [ID] int id,
         UpdateStudentInput input,
         [Service] IStudentService studentService,
+        [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
+        // Busca o aluno primeiro para verificar academia (CRIT-03)
+        var existing = await studentService.GetByIdAsync(id, cancellationToken)
+            ?? throw new NotFoundException("Student", id);
+
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, existing.AcademyId);
         return await studentService.UpdateAsync(id, input, cancellationToken);
     }
 
-    private static void EnforceAcademyAccess(HttpContext context, int requestedAcademyId)
+    [Authorize]
+    public async Task<bool> DeleteStudentAsync(
+        [ID] int id,
+        [Service] IStudentService studentService,
+        [Service] IHttpContextAccessor httpContext,
+        CancellationToken cancellationToken)
     {
-        var role = context.User.FindFirst(ClaimTypes.Role)?.Value;
-        if (role == "Admin") return;
+        var existing = await studentService.GetByIdAsync(id, cancellationToken)
+            ?? throw new NotFoundException("Student", id);
 
-        var academyIdClaim = context.User.FindFirst("academyId")?.Value;
-        if (academyIdClaim != requestedAcademyId.ToString())
-            throw new UnauthorizedAccessException(
-                "Acesso negado: você não tem permissão para acessar esta academia.");
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, existing.AcademyId);
+        await studentService.DeleteAsync(id, cancellationToken);
+        return true;
     }
 }

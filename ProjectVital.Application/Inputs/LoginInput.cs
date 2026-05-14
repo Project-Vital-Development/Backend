@@ -1,4 +1,8 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ProjectVital.Application.Inputs;
 
-/// <summary>Entrada da mutation `login`.</summary>
-public record LoginInput(string Email, string Password);
+public record LoginInput(
+    [Required][EmailAddress][StringLength(255)] string Email,
+    [Required][StringLength(255, MinimumLength = 8)] string Password
+);

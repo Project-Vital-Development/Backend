@@ -1,27 +1,18 @@
 namespace ProjectVital.Domain.Entities;
 
-/// <summary>
-/// Aluno matriculado em uma academia.
-/// Sujeito principal da análise preditiva de churn.
-/// </summary>
 public class Student
 {
     public int Id { get; set; }
-
-    /// <summary>FK para o User correspondente (Role = Student).</summary>
     public int UserId { get; set; }
-
-    /// <summary>FK para a academia em que o aluno está matriculado.</summary>
     public int AcademyId { get; set; }
-
-    /// <summary>FK para o plano contratado.</summary>
     public int PlanId { get; set; }
-
-    /// <summary>Data de matrícula do aluno.</summary>
     public DateTime EnrollmentDate { get; set; }
-
-    /// <summary>Indica se o aluno está ativo (false = cancelou ou foi desativado).</summary>
     public bool Active { get; set; } = true;
+
+    /// <summary>LGPD Art.18 — soft delete. Null = ativo; preenchido = excluído logicamente.</summary>
+    public DateTime? DeletedAt { get; set; }
+
+    public void SoftDelete() => DeletedAt = DateTime.UtcNow;
 
     // ── Navigation Properties ────────────────────────────────────────────────
     public User User { get; set; } = null!;

@@ -3,15 +3,11 @@ using ProjectVital.Application.Inputs;
 using ProjectVital.Application.Interfaces;
 using ProjectVital.Domain.Entities;
 using ProjectVital.Domain.Enums;
+using ProjectVital.Domain.Exceptions;
 using ProjectVital.Domain.Interfaces;
 
 namespace ProjectVital.Application.Services;
 
-/// <summary>
-/// Implementação do serviço de alunos.
-/// Aplica tenant isolation: Manager só pode operar alunos da sua própria academy.
-/// A validação do token (academyId claim) é feita no resolver — este serviço recebe entrada já validada.
-/// </summary>
 public class StudentService : IStudentService
 {
     private readonly IStudentRepository _students;
@@ -52,13 +48,14 @@ public class StudentService : IStudentService
     }
 
     /// <summary>
-    /// Cria um User (Role=Student) e o Student vinculado na mesma transação.
-    /// Email único é validado antes para retornar erro legível.
+    /// Cria User (Role=Student) e Student atomicamente usando a navegação EF Core.
+    /// Ambos são adicionados ao change tracker antes do único SaveChanges,
+    /// garantindo que a operação seja atômica (uma transação).
     /// </summary>
     public async Task<StudentDto> RegisterAsync(RegisterStudentInput input, CancellationToken cancellationToken = default)
     {
         if (await _users.EmailExistsAsync(input.Email, cancellationToken))
-            throw new InvalidOperationException($"E-mail '{input.Email}' já está em uso.");
+            throw new BusinessRuleException($"E-mail '{input.Email}' já está em uso.");
 
         var user = new User
         {
@@ -69,43 +66,41 @@ public class StudentService : IStudentService
             CreatedAt = DateTime.UtcNow
         };
 
-        await _users.AddAsync(user, cancellationToken);
-        await _users.SaveChangesAsync(cancellationToken);
-
+        // Usa navegação para que EF Core resolva User→Student na mesma transação
         var student = new Student
         {
-            UserId = user.Id,
+            User = user,
             AcademyId = input.AcademyId,
             PlanId = input.PlanId,
             EnrollmentDate = input.EnrollmentDate ?? DateTime.UtcNow,
             Active = true
         };
 
+        await _users.AddAsync(user, cancellationToken);
         await _students.AddAsync(student, cancellationToken);
+        // Único SaveChanges: INSERT User → Id gerado → INSERT Student (atômico)
         await _students.SaveChangesAsync(cancellationToken);
 
-        // Recarrega com relações para montar o DTO completo
         var created = await _students.GetWithRelationsAsync(student.Id, cancellationToken)
-            ?? throw new InvalidOperationException("Falha ao carregar aluno após criação.");
+            ?? throw new BusinessRuleException("Falha ao carregar aluno após criação.");
 
         return MapToDto(created);
     }
 
-    /// <summary>Partial update — somente campos não-nulos são aplicados.</summary>
     public async Task<StudentDto> UpdateAsync(int id, UpdateStudentInput input, CancellationToken cancellationToken = default)
     {
         var student = await _students.GetByIdAsync(id, cancellationToken)
-            ?? throw new KeyNotFoundException($"Aluno com Id={id} não encontrado.");
+            ?? throw new NotFoundException("Student", id);
 
         var user = await _users.GetByIdAsync(student.UserId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Usuário do aluno Id={id} não encontrado.");
+            ?? throw new NotFoundException($"Usuário do aluno Id={id} não encontrado.");
 
         if (input.Name is not null) user.Name = input.Name;
 
         if (input.Email is not null && input.Email != user.Email)
         {
             if (await _users.EmailExistsAsync(input.Email, cancellationToken))
-                throw new InvalidOperationException($"E-mail '{input.Email}' já está em uso.");
+                throw new BusinessRuleException($"E-mail '{input.Email}' já está em uso.");
             user.Email = input.Email;
         }
 
@@ -117,9 +112,23 @@ public class StudentService : IStudentService
         await _students.SaveChangesAsync(cancellationToken);
 
         var updated = await _students.GetWithRelationsAsync(id, cancellationToken)
-            ?? throw new InvalidOperationException("Falha ao carregar aluno após atualização.");
+            ?? throw new BusinessRuleException("Falha ao carregar aluno após atualização.");
 
         return MapToDto(updated);
+    }
+
+    /// <summary>Soft delete: marca Student e seu User como excluídos (LGPD Art.18).</summary>
+    public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var student = await _students.GetWithRelationsAsync(id, cancellationToken)
+            ?? throw new NotFoundException("Student", id);
+
+        student.SoftDelete();
+        student.User.SoftDelete();
+
+        await _students.UpdateAsync(student, cancellationToken);
+        await _users.UpdateAsync(student.User, cancellationToken);
+        await _students.SaveChangesAsync(cancellationToken);
     }
 
     // ── Mapeamento ────────────────────────────────────────────────────────────

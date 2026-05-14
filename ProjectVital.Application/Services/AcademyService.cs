@@ -5,10 +5,6 @@ using ProjectVital.Domain.Interfaces;
 
 namespace ProjectVital.Application.Services;
 
-/// <summary>
-/// Implementação do serviço de academias.
-/// Fornece dados agregados (KPIs) para o dashboard do gestor.
-/// </summary>
 public class AcademyService : IAcademyService
 {
     private readonly IAcademyRepository _academies;
@@ -37,26 +33,27 @@ public class AcademyService : IAcademyService
     }
 
     /// <summary>
-    /// Calcula KPIs do dashboard: contagens de risco, check-ins da semana,
-    /// frequência média semanal e distribuição de status dos alunos.
+    /// Calcula KPIs do dashboard em 2 queries (students + latest predictions)
+    /// em vez das 3 anteriores. Check-ins da semana mantidos em query separada
+    /// pois requer filtro de data.
     /// </summary>
     public async Task<AcademyKPIsDto> GetKPIsAsync(int academyId, CancellationToken cancellationToken = default)
     {
+        // Query 1: students (inclui contagem ativo/inativo)
         var allStudents = await _students.GetByAcademyIdAsync(academyId, null, cancellationToken);
         var totalStudents = allStudents.Count;
         var activeStudents = allStudents.Count(s => s.Active);
 
-        // Distribuição de risco baseada na última predição de cada aluno
-        var riskCounts = await _predictions.CountByRiskLevelAsync(academyId, cancellationToken);
-        var highRisk = riskCounts.GetValueOrDefault(RiskLevel.High, 0);
-        var mediumRisk = riskCounts.GetValueOrDefault(RiskLevel.Medium, 0);
-        var lowRisk = riskCounts.GetValueOrDefault(RiskLevel.Low, 0);
+        // Query 2: última predição por aluno (inclui contagem de risco)
+        var latestPredictions = await _predictions.GetLatestByAcademyAsync(academyId, cancellationToken);
+        var highRisk = latestPredictions.Count(p => p.RiskLevel == RiskLevel.High);
+        var mediumRisk = latestPredictions.Count(p => p.RiskLevel == RiskLevel.Medium);
+        var lowRisk = latestPredictions.Count(p => p.RiskLevel == RiskLevel.Low);
 
-        // Check-ins dos últimos 7 dias
+        // Query 3: check-ins dos últimos 7 dias (filtro de data obriga query separada)
         var weekStart = DateTime.UtcNow.AddDays(-7);
         var checkInsThisWeek = await _checkIns.CountByAcademyAsync(academyId, weekStart, null, cancellationToken);
 
-        // Frequência média semanal = check-ins / alunos ativos (evita divisão por zero)
         var avgWeeklyFrequency = activeStudents > 0
             ? (double)checkInsThisWeek / activeStudents
             : 0.0;

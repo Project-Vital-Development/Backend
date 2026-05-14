@@ -3,17 +3,12 @@ using ProjectVital.Domain.Entities;
 
 namespace ProjectVital.Infrastructure.Persistence;
 
-/// <summary>
-/// Contexto principal do EF Core. Code-First: o schema do MySQL é gerado a partir
-/// destas configurações via migrations. NUNCA editar o banco diretamente — sempre via migration.
-/// </summary>
 public class ProjectVitalDbContext : DbContext
 {
     public ProjectVitalDbContext(DbContextOptions<ProjectVitalDbContext> options) : base(options)
     {
     }
 
-    // ── DbSets ───────────────────────────────────────────────────────────────
     public DbSet<User> Users => Set<User>();
     public DbSet<Academy> Academies => Set<Academy>();
     public DbSet<Plan> Plans => Set<Plan>();
@@ -23,8 +18,13 @@ public class ProjectVitalDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Aplica todas as IEntityTypeConfiguration<T> deste assembly
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ProjectVitalDbContext).Assembly);
+
+        // ── Global Query Filters (LGPD soft delete) ──────────────────────────
+        // Entidades soft-deletadas são invisíveis em todas as queries normais.
+        // Use .IgnoreQueryFilters() quando precisar acessar registros excluídos.
+        modelBuilder.Entity<User>().HasQueryFilter(u => u.DeletedAt == null);
+        modelBuilder.Entity<Student>().HasQueryFilter(s => s.DeletedAt == null);
 
         base.OnModelCreating(modelBuilder);
     }

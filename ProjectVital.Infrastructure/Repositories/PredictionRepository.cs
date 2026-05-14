@@ -19,32 +19,38 @@ public class PredictionRepository : Repository<Prediction>, IPredictionRepositor
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Retorna a predição mais recente de cada aluno da academia.
+    /// Usa subquery com MAX(PredictedAt) para evitar N+1: uma única query SQL.
+    /// </summary>
     public async Task<IReadOnlyList<Prediction>> GetLatestByAcademyAsync(int academyId, CancellationToken cancellationToken = default)
     {
-        // Para cada Student da academia, pega a Prediction mais recente.
-        // Estratégia: GROUP BY StudentId pegando o MAX(PredictedAt), depois JOIN para recuperar a linha.
-        var latestPerStudent = Db.Predictions
+        // Subquery: para cada StudentId, encontra o timestamp máximo
+        var latestTimestamps = Db.Predictions
             .Where(p => p.Student.AcademyId == academyId)
             .GroupBy(p => p.StudentId)
             .Select(g => new { StudentId = g.Key, MaxAt = g.Max(p => p.PredictedAt) });
 
+        // JOIN entre Predictions e os timestamps máximos — uma única query SQL
         return await Db.Predictions
             .AsNoTracking()
-            .Where(p => latestPerStudent.Any(l => l.StudentId == p.StudentId && l.MaxAt == p.PredictedAt))
+            .Where(p => p.Student.AcademyId == academyId)
+            .Join(latestTimestamps,
+                p => new { p.StudentId, At = p.PredictedAt },
+                l => new { l.StudentId, At = l.MaxAt },
+                (p, _) => p)
             .OrderByDescending(p => p.Probability)
             .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyDictionary<RiskLevel, int>> CountByRiskLevelAsync(int academyId, CancellationToken cancellationToken = default)
     {
-        // Conta cada nível de risco baseado na predição MAIS RECENTE de cada aluno
         var latest = await GetLatestByAcademyAsync(academyId, cancellationToken);
 
         var grouped = latest
             .GroupBy(p => p.RiskLevel)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        // Garante que todas as chaves existam mesmo com contagem zero
         foreach (RiskLevel level in Enum.GetValues<RiskLevel>())
         {
             if (!grouped.ContainsKey(level))
