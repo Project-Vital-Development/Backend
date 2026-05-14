@@ -38,7 +38,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(u => u.CreatedAt)
             .IsRequired()
-            .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
 
         // Índice único sobre Email — base do login
         builder.HasIndex(u => u.Email)

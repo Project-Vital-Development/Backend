@@ -27,7 +27,7 @@ public class AcademyConfiguration : IEntityTypeConfiguration<Academy>
 
         builder.Property(a => a.CreatedAt)
             .IsRequired()
-            .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
 
         // FK Academies.ManagerId → Users.Id (1:1 — cada Manager gerencia uma Academy)
         builder.HasOne(a => a.Manager)
