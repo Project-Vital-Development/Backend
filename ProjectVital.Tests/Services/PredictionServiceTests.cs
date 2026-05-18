@@ -1,8 +1,11 @@
 using Moq;
 using Xunit;
+using ProjectVital.Application.DTOs;
+using ProjectVital.Application.Interfaces;
 using ProjectVital.Application.Services;
 using ProjectVital.Domain.Entities;
 using ProjectVital.Domain.Enums;
+using ProjectVital.Domain.Exceptions;
 using ProjectVital.Domain.Interfaces;
 
 namespace ProjectVital.Tests.Services;
@@ -10,12 +13,16 @@ namespace ProjectVital.Tests.Services;
 public class PredictionServiceTests
 {
     private readonly Mock<IPredictionRepository> _predRepo;
+    private readonly Mock<IStudentRepository> _studentRepo;
+    private readonly Mock<IMLServiceClient> _mlClient;
     private readonly PredictionService _sut;
 
     public PredictionServiceTests()
     {
         _predRepo = new Mock<IPredictionRepository>();
-        _sut = new PredictionService(_predRepo.Object);
+        _studentRepo = new Mock<IStudentRepository>();
+        _mlClient = new Mock<IMLServiceClient>();
+        _sut = new PredictionService(_predRepo.Object, _studentRepo.Object, _mlClient.Object);
     }
 
     [Fact]
@@ -53,16 +60,47 @@ public class PredictionServiceTests
     }
 
     [Fact]
-    public async Task RunAsync_IsStub_ThrowsNotImplemented()
+    public async Task RunAsync_CallsMLClientAndSavesPrediction()
     {
-        await Assert.ThrowsAsync<NotImplementedException>(
-            () => _sut.RunAsync(1));
+        var student = new Student { Id = 1, AcademyId = 10, Active = true };
+        _studentRepo.Setup(r => r.GetByIdAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(student);
+
+        _mlClient.Setup(c => c.PredictAsync(1, 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MLPredictionResult(0.8, "high", "rf_v1.0"));
+
+        _predRepo.Setup(r => r.AddAsync(It.IsAny<Prediction>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Prediction p, CancellationToken _) => p);
+        _predRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var result = await _sut.RunAsync(1);
+
+        Assert.NotNull(result);
+        Assert.Equal(0.8, result.Probability);
+        Assert.Equal(RiskLevel.High, result.RiskLevel);
+        Assert.Equal("rf_v1.0", result.ModelVersion);
+        _predRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task RunBatchAsync_IsStub_ThrowsNotImplemented()
+    public async Task RunAsync_WithUnknownStudent_ThrowsNotFoundException()
     {
-        await Assert.ThrowsAsync<NotImplementedException>(
-            () => _sut.RunBatchAsync(1));
+        _studentRepo.Setup(r => r.GetByIdAsync(99, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Student?)null);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => _sut.RunAsync(99));
+    }
+
+    [Fact]
+    public async Task RunBatchAsync_ReturnsEmptyList_WhenMLReturnsEmpty()
+    {
+        _mlClient.Setup(c => c.PredictBatchAsync(10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MLBatchPredictionItem>());
+
+        var result = await _sut.RunBatchAsync(10);
+
+        Assert.Empty(result);
+        _predRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

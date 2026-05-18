@@ -14,6 +14,7 @@ using ProjectVital.Domain.Enums;
 using ProjectVital.Domain.Interfaces;
 using ProjectVital.Infrastructure.Persistence;
 using ProjectVital.Infrastructure.Repositories;
+using ProjectVital.ML;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -57,6 +58,19 @@ builder.Services.AddScoped<IPlanRepository, PlanRepository>();
 builder.Services.AddScoped<IStudentRepository, StudentRepository>();
 builder.Services.AddScoped<ICheckInRepository, CheckInRepository>();
 builder.Services.AddScoped<IPredictionRepository, PredictionRepository>();
+
+// ── ML Service HTTP Client ────────────────────────────────────────────────────
+var mlServiceUrl = builder.Configuration["ML_SERVICE_URL"]
+    ?? "http://ml-service:8000";
+
+var mlTimeoutSeconds = int.TryParse(builder.Configuration["ML_SERVICE_TIMEOUT_SECONDS"], out var t) ? t : 30;
+
+builder.Services.AddHttpClient<IMLServiceClient, MLServiceClient>(client =>
+{
+    client.BaseAddress = new Uri(mlServiceUrl);
+    client.Timeout = TimeSpan.FromSeconds(mlTimeoutSeconds);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
 
 // ── Application Services (DI) ─────────────────────────────────────────────────
 builder.Services.AddScoped<IAuthService, AuthService>();

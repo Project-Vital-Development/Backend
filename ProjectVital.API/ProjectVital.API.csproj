@@ -25,6 +25,7 @@
     <ProjectReference Include="..\ProjectVital.Application\ProjectVital.Application.csproj" />
     <ProjectReference Include="..\ProjectVital.Domain\ProjectVital.Domain.csproj" />
     <ProjectReference Include="..\ProjectVital.Infrastructure\ProjectVital.Infrastructure.csproj" />
+    <ProjectReference Include="..\ProjectVital.ML\ProjectVital.ML.csproj" />
   </ItemGroup>
 
 </Project>
