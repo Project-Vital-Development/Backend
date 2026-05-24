@@ -6,6 +6,26 @@ using ProjectVital.Domain.Interfaces;
 
 namespace ProjectVital.Tests.Services;
 
+/// <summary>
+/// Testes unitários de CheckInService.
+///
+/// ESTRATÉGIA DE TESTES:
+///   - Moq para ICheckInRepository e IStudentRepository (sem banco real)
+///   - Testa os 3 caminhos de RegisterAsync: sucesso, aluno inativo, aluno inexistente
+///
+/// POR QUE ESTES 3 CASOS SÃO CRÍTICOS:
+///   1. Aluno ativo → caminho feliz: check-in salvo, retorno com StudentId correto
+///   2. Aluno inativo → regra de negócio: não pode entrar na academia se cancelou
+///      AppErrorFilter mapeia InvalidOperationException → "BUSINESS_RULE_VIOLATION"
+///   3. Aluno inexistente → segurança: não deve criar check-in órfão
+///      AppErrorFilter mapeia KeyNotFoundException → "NOT_FOUND"
+///
+/// EXECUTAR: dotnet test --filter "FullyQualifiedName~CheckInServiceTests"
+///
+/// SE MUDAR A REGRA "aluno inativo não pode fazer check-in":
+///   Atualizar CheckInService.RegisterAsync() E atualizar este teste.
+///   O teste documenta o comportamento esperado — se o teste muda, a regra mudou.
+/// </summary>
 public class CheckInServiceTests
 {
     private readonly Mock<ICheckInRepository> _checkInRepo;
@@ -19,6 +39,10 @@ public class CheckInServiceTests
         _sut = new CheckInService(_checkInRepo.Object, _studentRepo.Object);
     }
 
+    /// <summary>
+    /// Aluno ativo deve poder fazer check-in com sucesso.
+    /// Verifica: retorno não-null, StudentId correto, SaveChanges chamado.
+    /// </summary>
     [Fact]
     public async Task RegisterAsync_WithActiveStudent_CreatesCheckIn()
     {
@@ -38,6 +62,12 @@ public class CheckInServiceTests
         Assert.Equal(1, result.StudentId);
     }
 
+    /// <summary>
+    /// Aluno inativo (Active=false) não pode fazer check-in — regra de negócio.
+    /// AppErrorFilter mapeia InvalidOperationException → "BUSINESS_RULE_VIOLATION" no GraphQL.
+    ///
+    /// CENÁRIO REAL: aluno cancelou a matrícula mas ainda tenta entrar.
+    /// </summary>
     [Fact]
     public async Task RegisterAsync_WithInactiveStudent_ThrowsInvalidOperation()
     {
@@ -49,6 +79,11 @@ public class CheckInServiceTests
             () => _sut.RegisterAsync(2));
     }
 
+    /// <summary>
+    /// StudentId desconhecido deve lançar KeyNotFoundException.
+    /// Evita criar check-in órfão (sem Student vinculado) no banco.
+    /// AppErrorFilter mapeia → "NOT_FOUND" no GraphQL.
+    /// </summary>
     [Fact]
     public async Task RegisterAsync_WithUnknownStudent_ThrowsKeyNotFound()
     {

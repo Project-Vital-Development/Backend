@@ -3,26 +3,84 @@ using ProjectVital.Domain.Entities;
 
 namespace ProjectVital.Infrastructure.Persistence;
 
+/// <summary>
+/// Unidade central de trabalho do EF Core. Representa uma sessão com o banco MySQL.
+/// Todos os repositórios recebem esta instância via injeção de dependência (Scoped).
+///
+/// RESPONSABILIDADES:
+///   1. Expõe DbSet para cada entidade (tabela) do banco
+///   2. Aplica configurações de mapeamento via IEntityTypeConfiguration
+///   3. Configura Global Query Filters para soft delete (LGPD)
+///
+/// ESCOPO (Scoped no DI):
+///   Uma instância por request HTTP. Isso significa que todos os repositórios
+///   usados em um mesmo request compartilham o MESMO DbContext — logo, uma
+///   única chamada SaveChangesAsync() salva alterações de TODOS os repositórios.
+///   Isso é a base da atomicidade em StudentService.RegisterAsync().
+///
+/// SE ADICIONAR UMA NOVA ENTIDADE:
+///   1. Criar a classe em Domain/Entities/
+///   2. Adicionar DbSet aqui
+///   3. Criar IEntityTypeConfiguration em Infrastructure/Persistence/Configurations/
+///   4. Se a entidade tem soft delete, adicionar HasQueryFilter aqui
+///   5. Criar migration: dotnet ef migrations add NomeDescritivo
+///
+/// SE MUDAR O SCHEMA (adicionar coluna, índice, FK):
+///   Criar uma nova migration — NUNCA editar migration existente que já foi aplicada.
+/// </summary>
 public class ProjectVitalDbContext : DbContext
 {
     public ProjectVitalDbContext(DbContextOptions<ProjectVitalDbContext> options) : base(options)
     {
     }
 
+    // ── DbSets — cada um representa uma tabela no MySQL ───────────────────────────
+
+    /// <summary>Tabela Users — contas de login (Admins, Managers e Students).</summary>
     public DbSet<User> Users => Set<User>();
+
+    /// <summary>Tabela Academies — tenant root. Uma linha por academia cadastrada.</summary>
     public DbSet<Academy> Academies => Set<Academy>();
+
+    /// <summary>Tabela Plans — planos de mensalidade oferecidos por cada academia.</summary>
     public DbSet<Plan> Plans => Set<Plan>();
+
+    /// <summary>Tabela Students — alunos matriculados. Sempre associado a um User e Academy.</summary>
     public DbSet<Student> Students => Set<Student>();
+
+    /// <summary>
+    /// Tabela CheckIns — registros de entrada na academia.
+    /// Esta é a tabela com maior volume de dados — crescimento proporcional ao uso.
+    /// Tem índice composto (StudentId, Timestamp) crítico para as queries do ML Service.
+    /// </summary>
     public DbSet<CheckIn> CheckIns => Set<CheckIn>();
+
+    /// <summary>
+    /// Tabela Predictions — histórico imutável de predições ML.
+    /// Cada chamada a runPrediction() insere uma nova linha — nunca atualiza existentes.
+    /// </summary>
     public DbSet<Prediction> Predictions => Set<Prediction>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Carrega automaticamente TODOS os arquivos IEntityTypeConfiguration<T>
+        // da assembly atual (Infrastructure). Isso inclui UserConfiguration,
+        // StudentConfiguration, CheckInConfiguration, etc.
+        // SE CRIAR UMA NOVA CONFIGURATION, ela é detectada automaticamente aqui.
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ProjectVitalDbContext).Assembly);
 
-        // ── Global Query Filters (LGPD soft delete) ──────────────────────────
-        // Entidades soft-deletadas são invisíveis em todas as queries normais.
-        // Use .IgnoreQueryFilters() quando precisar acessar registros excluídos.
+        // ── Global Query Filters — Soft Delete (LGPD Art.18) ─────────────────────
+        // Filtra automaticamente registros com DeletedAt != null em TODAS as queries.
+        // Efeito: EF Core adiciona "WHERE DeletedAt IS NULL" em todo SELECT dessas entidades.
+        //
+        // COMO DESATIVAR TEMPORARIAMENTE:
+        //   Use .IgnoreQueryFilters() em uma query específica quando precisar ver excluídos.
+        //   Ex: db.Users.IgnoreQueryFilters().Where(u => u.DeletedAt != null)
+        //
+        // SE ADICIONAR SOFT DELETE EM OUTRA ENTIDADE:
+        //   1. Adicionar DeletedAt (DateTime?) + SoftDelete() na entidade
+        //   2. Adicionar HasQueryFilter aqui
+        //   3. Criar migration para adicionar a coluna
         modelBuilder.Entity<User>().HasQueryFilter(u => u.DeletedAt == null);
         modelBuilder.Entity<Student>().HasQueryFilter(s => s.DeletedAt == null);
 

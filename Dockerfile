@@ -9,10 +9,12 @@ WORKDIR /src
 
 # Copia apenas os .csproj primeiro para aproveitar cache do dotnet restore
 COPY ProjectVital.sln ./
-COPY ProjectVital.Domain/ProjectVital.Domain.csproj           ProjectVital.Domain/
-COPY ProjectVital.Application/ProjectVital.Application.csproj ProjectVital.Application/
+COPY ProjectVital.Domain/ProjectVital.Domain.csproj                 ProjectVital.Domain/
+COPY ProjectVital.Application/ProjectVital.Application.csproj       ProjectVital.Application/
 COPY ProjectVital.Infrastructure/ProjectVital.Infrastructure.csproj ProjectVital.Infrastructure/
-COPY ProjectVital.API/ProjectVital.API.csproj                 ProjectVital.API/
+COPY ProjectVital.API/ProjectVital.API.csproj                       ProjectVital.API/
+COPY ProjectVital.ML/ProjectVital.ML.csproj                         ProjectVital.ML/
+COPY ProjectVital.Tests/ProjectVital.Tests.csproj                   ProjectVital.Tests/
 
 RUN dotnet restore ProjectVital.sln
 

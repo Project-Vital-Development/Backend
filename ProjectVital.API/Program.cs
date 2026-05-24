@@ -1,3 +1,31 @@
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║  Program.cs — Entry Point do Backend ProjectVital (.NET 8)               ║
+// ║                                                                           ║
+// ║  RESPONSABILIDADE:                                                        ║
+// ║  Configura e inicializa toda a aplicação ASP.NET Core:                    ║
+// ║  1. Leitura de variáveis de ambiente (.env / appsettings.json)            ║
+// ║  2. Registro de serviços no container de DI (builder.Services)            ║
+// ║  3. Configuração do pipeline de middleware (app.Use*)                     ║
+// ║  4. Seed de dados de desenvolvimento (apenas em Development)              ║
+// ║                                                                           ║
+// ║  QUANDO ADICIONAR UM NOVO RESOLVER GRAPHQL:                               ║
+// ║  1. Criar a classe do resolver em API/GraphQL/Resolvers/                  ║
+// ║  2. Adicionar .AddTypeExtension<NovoResolver>() na seção Hot Chocolate    ║
+// ║  3. Se o resolver tiver tipo GraphQL dedicado, adicionar .AddType<>()     ║
+// ║                                                                           ║
+// ║  QUANDO ADICIONAR UM NOVO SERVICE/REPOSITORY:                             ║
+// ║  1. Criar interface em Domain/Interfaces/                                 ║
+// ║  2. Criar implementação em Infrastructure/Repositories/ ou                ║
+// ║     Application/Services/                                                 ║
+// ║  3. Registrar com AddScoped<IInterface, Implementacao>() abaixo           ║
+// ║                                                                           ║
+// ║  VARIÁVEIS DE AMBIENTE OBRIGATÓRIAS:                                      ║
+// ║  - DB_CONNECTION_STRING  → conexão MySQL                                  ║
+// ║  - JWT_SECRET            → chave JWT (≥32 chars)                          ║
+// ║  Opcionais: ML_SERVICE_URL, ML_SERVICE_TIMEOUT_SECONDS, JWT_EXPIRY_HOURS  ║
+// ║  Todas definidas no .env na raiz do projeto.                              ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -165,6 +193,18 @@ builder.Services.AddHealthChecks()
 var app = builder.Build();
 
 // ── Middleware pipeline — ORDEM É CRÍTICA ────────────────────────────────────
+// A ORDEM ABAIXO NÃO PODE SER ALTERADA SEM CONSEQUÊNCIAS:
+//
+// 1. UseCors     → precisa ser antes de qualquer autenticação para que o browser
+//                  receba os headers CORS antes de ser bloqueado por auth
+// 2. UseRateLimiter → antes de auth para bloquear antes de processar credenciais
+// 3. UseAuthentication → lê e valida o Bearer token do header Authorization
+// 4. UseAuthorization  → usa as claims do passo anterior para verificar [Authorize]
+//                        DEVE VIR DEPOIS de UseAuthentication
+//
+// SE INVERTER UseAuthentication e UseAuthorization: [Authorize] não terá claims
+// e bloqueará requests válidos.
+// SE COLOCAR UseCors depois de UseAuthentication: preflight OPTIONS falha com 401.
 app.UseCors("Frontend");
 app.UseRateLimiter();
 app.UseAuthentication();
