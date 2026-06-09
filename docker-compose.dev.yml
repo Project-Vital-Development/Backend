@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Project Vital — Docker Compose
+# Orquestração local dos 4 serviços: db, backend, ml-service, frontend
+# Rede interna: projectvital-net (comunicação por nome de serviço)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── MySQL 8 ────────────────────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: projectvital-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      # Vars consumidas pelo script ./database/init/01_create_readonly_user.sh
+      # (cria o usuário read-only do ML Service na primeira inicialização do container).
+      ML_DB_USER: ${ML_DB_USER}
+      ML_DB_PASSWORD: ${ML_DB_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - projectvital-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+
+  # ── Backend .NET 8 (ASP.NET Core + GraphQL) ────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: projectvital-backend
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+      ASPNETCORE_URLS: http://+:80
+      DB_CONNECTION_STRING: "Server=db;Port=3306;Database=${MYSQL_DATABASE};Uid=${DB_USER};Pwd=${DB_PASSWORD};"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS}
+      ML_SERVICE_URL: http://ml-service:8000
+      ML_SERVICE_TIMEOUT_SECONDS: ${ML_SERVICE_TIMEOUT_SECONDS}
+    ports:
+      - "5000:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - projectvital-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ── ML Service (FastAPI + Python) ──────────────────────────────────────────
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: projectvital-ml
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_USER: ${ML_DB_USER}
+      DB_PASSWORD: ${ML_DB_PASSWORD}
+      MODEL_PATH: /app/models
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./ml-service/models:/app/models
+    networks:
+      - projectvital-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Frontend React (Vite build → nginx) ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # VITE_ vars são embutidas no bundle estático em build-time (não runtime).
+        # Usamos URL relativa para que o nginx proxy resolva internamente.
+        VITE_GRAPHQL_URL: /graphql
+    container_name: projectvital-frontend
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - projectvital-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ── Network ──────────────────────────────────────────────────────────────────
+networks:
+  projectvital-net:
+    driver: bridge
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  db_data:
+    driver: local
