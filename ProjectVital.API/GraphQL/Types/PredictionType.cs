@@ -1,5 +1,7 @@
+using HotChocolate;
 using HotChocolate.Types;
 using ProjectVital.Application.DTOs;
+using ProjectVital.Application.Interfaces;
 
 namespace ProjectVital.API.GraphQL.Types;
 
@@ -66,5 +68,16 @@ public class PredictionType : ObjectType<PredictionDto>
 
         // UTC — quando o ML Service processou a predição (não quando foi chamado)
         descriptor.Field(p => p.PredictedAt).Type<NonNullType<DateTimeType>>();
+
+        // Campo resolvido via StudentService — inclui dados do aluno na predição.
+        // N+1 mitigado pelo tamanho pequeno dos datasets (TD-03: DataLoader é o fix correto).
+        descriptor.Field("student")
+            .Resolve(async (ctx, ct) =>
+            {
+                var pred = ctx.Parent<PredictionDto>();
+                var studentService = ctx.Service<IStudentService>();
+                return await studentService.GetByIdAsync(pred.StudentId, ct);
+            })
+            .Type<StudentType>();
     }
 }

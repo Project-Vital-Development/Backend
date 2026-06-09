@@ -34,6 +34,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using ProjectVital.API.GraphQL.Errors;
 using ProjectVital.API.GraphQL.Resolvers;
+using ProjectVital.Application.DTOs;
 using ProjectVital.API.GraphQL.Types;
 using ProjectVital.Application.Interfaces;
 using ProjectVital.Application.Services;
@@ -172,9 +173,11 @@ builder.Services
     .AddTypeExtension<StudentMutationResolver>()
     .AddTypeExtension<CheckInMutationResolver>()
     .AddTypeExtension<PredictionMutationResolver>()
+    .AddTypeExtension<PlanQueryResolver>()
     .AddType<StudentType>()
     .AddType<CheckInType>()
     .AddType<PredictionType>()
+    .AddType<PlanType>()
     .AddType<AcademyKPIsType>()
     .AddType<UserType>()
     .AddType<AuthPayloadType>()
@@ -222,12 +225,13 @@ if (app.Environment.IsDevelopment())
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ProjectVitalDbContext>();
     var authSvc = scope.ServiceProvider.GetRequiredService<IAuthService>();
+    var mlClient = scope.ServiceProvider.GetRequiredService<IMLServiceClient>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await db.Database.MigrateAsync();
     logger.LogInformation("Migrations aplicadas com sucesso.");
 
-    await SeedDevelopmentDataAsync(db, authSvc, logger);
+    await SeedDevelopmentDataAsync(db, authSvc, mlClient, logger);
 }
 
 app.Run();
@@ -236,82 +240,217 @@ app.Run();
 static async Task SeedDevelopmentDataAsync(
     ProjectVitalDbContext db,
     IAuthService auth,
+    IMLServiceClient mlClient,
     ILogger logger)
 {
-    if (await db.Users.AnyAsync()) return;
+    // Idempotência: guarda pelo e-mail do novo manager
+    if (await db.Users.AnyAsync(u => u.Email == "gestor@vital.dev")) return;
 
-    logger.LogInformation("Inserindo dados de seed para desenvolvimento...");
+    logger.LogInformation("Inserindo dados de seed realista (20 alunos, 3 planos)...");
 
+    var agora = DateTime.UtcNow;
+
+    // ── 1. Manager ────────────────────────────────────────────────────────────
     var manager = new User
     {
-        Name = "Admin Teste",
-        Email = "admin@projectvital.dev",
+        Name = "Gestor Principal",
+        Email = "gestor@vital.dev",
         PasswordHash = auth.HashPassword("Senha@123"),
         Role = UserRole.Manager,
-        CreatedAt = DateTime.UtcNow
+        CreatedAt = agora
     };
     db.Users.Add(manager);
     await db.SaveChangesAsync();
 
+    // ── 2. Academia ───────────────────────────────────────────────────────────
     var academy = new Academy
     {
-        Name = "Academia Project Vital",
-        Address = "Rua Teste, 123 — Americana/SP",
+        Name = "Academia Central Americana",
+        Address = "Av. Brasil, 450 — Americana/SP",
         ManagerId = manager.Id,
-        CreatedAt = DateTime.UtcNow
+        CreatedAt = agora
     };
     db.Academies.Add(academy);
     await db.SaveChangesAsync();
 
-    var plan = new Plan
-    {
-        AcademyId = academy.Id,
-        Name = "Plano Básico",
-        Price = 99.90m,
-        DurationDays = 30
-    };
-    db.Plans.Add(plan);
+    // ── 3. Planos ─────────────────────────────────────────────────────────────
+    var planMensal     = new Plan { AcademyId = academy.Id, Name = "Mensal",      Price = 89.90m,  DurationDays = 30  };
+    var planTrimestral = new Plan { AcademyId = academy.Id, Name = "Trimestral",  Price = 239.70m, DurationDays = 90  };
+    var planAnual      = new Plan { AcademyId = academy.Id, Name = "Anual",       Price = 799.00m, DurationDays = 365 };
+    db.Plans.AddRange(planMensal, planTrimestral, planAnual);
     await db.SaveChangesAsync();
 
-    var alunoNames = new[] { ("João Silva", "joao@test.dev"), ("Maria Santos", "maria@test.dev"), ("Carlos Lima", "carlos@test.dev") };
-    foreach (var (name, email) in alunoNames)
+    // ── Helpers locais ────────────────────────────────────────────────────────
+
+    async Task<Student> CriarAluno(string nome, string email, Plan plano, int diasMatricula, bool ativo = true)
     {
-        var userAluno = new User
+        var user = new User
         {
-            Name = name,
+            Name = nome,
             Email = email,
             PasswordHash = auth.HashPassword("Senha@123"),
             Role = UserRole.Student,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = agora
         };
-        db.Users.Add(userAluno);
+        db.Users.Add(user);
         await db.SaveChangesAsync();
 
         var student = new Student
         {
-            UserId = userAluno.Id,
+            UserId = user.Id,
             AcademyId = academy.Id,
-            PlanId = plan.Id,
-            EnrollmentDate = DateTime.UtcNow.AddDays(-60),
-            Active = true
+            PlanId = plano.Id,
+            EnrollmentDate = agora.AddDays(-diasMatricula),
+            Active = ativo
         };
         db.Students.Add(student);
         await db.SaveChangesAsync();
+        return student;
+    }
 
-        var random = new Random(student.Id);
-        for (int i = 0; i < 12; i++)
+    // Soft-delete: desativa Student + User (Global Query Filter filtrará ambos)
+    async Task SoftDeleteAluno(Student student)
+    {
+        student.Active = false;
+        student.SoftDelete();
+        var user = await db.Users.FindAsync(student.UserId);
+        if (user is not null) user.SoftDelete();
+        await db.SaveChangesAsync();
+    }
+
+    void AdicionarCheckIns(Student s, IEnumerable<int> diasAtras, int baseDuracao = 60)
+    {
+        var rng = new Random(s.Id);
+        foreach (var dia in diasAtras)
         {
             db.CheckIns.Add(new CheckIn
             {
-                StudentId = student.Id,
-                Timestamp = DateTime.UtcNow.AddDays(-(random.Next(1, 55)))
+                StudentId = s.Id,
+                Timestamp = agora
+                    .AddDays(-dia)
+                    .AddHours(rng.Next(6, 21))
+                    .AddMinutes(rng.Next(0, 60)),
+                DurationMinutes = baseDuracao + rng.Next(-10, 20)
             });
         }
     }
 
+    // ── 4. Perfil A — "Ativo Regular" (6 alunos) ─────────────────────────────
+    // Check-in a cada 2 dias por 60 dias (≈30 entradas); último ≤ 2 dias.
+    // Matriculados há 90 dias.
+    int[] DiasPerfilA(int inicio) { var r = new List<int>(); for (int d = inicio; d <= 60; d += 2) r.Add(d); return r.ToArray(); }
+
+    var pA1 = await CriarAluno("Lucas Oliveira",   "lucas.oliveira@vital.dev",   planTrimestral, 90);
+    var pA2 = await CriarAluno("Ana Beatriz Costa","ana.costa@vital.dev",        planTrimestral, 90);
+    var pA3 = await CriarAluno("Rafael Mendes",    "rafael.mendes@vital.dev",    planAnual,      90);
+    var pA4 = await CriarAluno("Fernanda Lima",    "fernanda.lima@vital.dev",    planTrimestral, 90);
+    var pA5 = await CriarAluno("Bruno Carvalho",   "bruno.carvalho@vital.dev",   planAnual,      90);
+    var pA6 = await CriarAluno("Camila Rodrigues", "camila.rodrigues@vital.dev", planTrimestral, 90);
+
+    AdicionarCheckIns(pA1, DiasPerfilA(1));   // último: 1 dia atrás
+    AdicionarCheckIns(pA2, DiasPerfilA(2));   // último: 2 dias atrás
+    AdicionarCheckIns(pA3, DiasPerfilA(1));
+    AdicionarCheckIns(pA4, DiasPerfilA(2));
+    AdicionarCheckIns(pA5, DiasPerfilA(1));
+    AdicionarCheckIns(pA6, DiasPerfilA(2));
     await db.SaveChangesAsync();
-    // SEC-01: Nunca logar senha em texto plano — apenas email e academyId
+
+    // ── 5. Perfil B — "Em Risco Médio" (5 alunos) ────────────────────────────
+    // Primeiras 4 semanas: 2x/semana (a cada 3–4 dias).
+    // Semanas 5–10: 1x/semana (a cada 7 dias). Último: 8–12 dias atrás.
+    // Matriculados há 75 dias. Último check-in ≤ 75.
+    int[] DiasPerfilB(int ultimoHaDias)
+    {
+        var r = new List<int>();
+        // Fase 1 — 4 semanas iniciais (dias 75 até 48): a cada 3–4 dias
+        for (int d = 75; d >= 48; d -= 4) r.Add(d);
+        // Fase 2 — frequência caindo (dias 42 até 15): 1x/semana
+        for (int d = 42; d >= 15; d -= 7) r.Add(d);
+        // Último check-in recente
+        r.Add(ultimoHaDias);
+        return r.ToArray();
+    }
+
+    var pB1 = await CriarAluno("Juliana Ferreira", "juliana.ferreira@vital.dev", planMensal,     75);
+    var pB2 = await CriarAluno("Marcos Santos",    "marcos.santos@vital.dev",    planTrimestral, 75);
+    var pB3 = await CriarAluno("Patricia Alves",   "patricia.alves@vital.dev",   planMensal,     75);
+    var pB4 = await CriarAluno("Diego Souza",      "diego.souza@vital.dev",      planTrimestral, 75);
+    var pB5 = await CriarAluno("Renata Nunes",     "renata.nunes@vital.dev",     planMensal,     75);
+
+    AdicionarCheckIns(pB1, DiasPerfilB(8));
+    AdicionarCheckIns(pB2, DiasPerfilB(10));
+    AdicionarCheckIns(pB3, DiasPerfilB(9));
+    AdicionarCheckIns(pB4, DiasPerfilB(12));
+    AdicionarCheckIns(pB5, DiasPerfilB(11));
+    await db.SaveChangesAsync();
+
+    // ── 6. Perfil C — "Alto Risco" (4 alunos) ────────────────────────────────
+    // 5 check-ins nos primeiros 15 dias após matrícula.
+    // Depois: silêncio de 18–35 dias (último check-in = 18 a 35 dias atrás).
+    // Matriculados há 60 dias. Plano Mensal.
+    // Nota: "primeiros 15 dias" = dias 60 até 45 atrás. Último = 18–35 dias.
+    int[] DiasPerfilC(int ultimoHaDias)
+    {
+        var r = new List<int> { 60, 57, 54, 51, 48 };  // 5 check-ins nos primeiros 15 dias
+        r.Add(ultimoHaDias);                            // único check-in recente (18–35 dias)
+        return r.ToArray();
+    }
+
+    var pC1 = await CriarAluno("Thiago Barbosa", "thiago.barbosa@vital.dev", planMensal, 60);
+    var pC2 = await CriarAluno("Larissa Martins","larissa.martins@vital.dev", planMensal, 60);
+    var pC3 = await CriarAluno("Felipe Costa",   "felipe.costa@vital.dev",   planMensal, 60);
+    var pC4 = await CriarAluno("Amanda Silva",   "amanda.silva@vital.dev",   planMensal, 60);
+
+    AdicionarCheckIns(pC1, DiasPerfilC(18));
+    AdicionarCheckIns(pC2, DiasPerfilC(25));
+    AdicionarCheckIns(pC3, DiasPerfilC(30));
+    AdicionarCheckIns(pC4, DiasPerfilC(35));
+    await db.SaveChangesAsync();
+
+    // ── 7. Perfil D — "Inativo Confirmado" (3 alunos) ────────────────────────
+    // active=false + soft delete. Último check-in: 45–70 dias atrás.
+    // Matriculados há 120 dias.
+    // ATENÇÃO: SoftDelete() é chamado em Student + User → invisíveis no dashboard.
+    var pD1 = await CriarAluno("Rodrigo Lima",     "rodrigo.lima@vital.dev",     planMensal,     120, ativo: false);
+    var pD2 = await CriarAluno("Vanessa Pereira",  "vanessa.pereira@vital.dev",  planTrimestral, 120, ativo: false);
+    var pD3 = await CriarAluno("Gustavo Almeida",  "gustavo.almeida@vital.dev",  planMensal,     120, ativo: false);
+
+    AdicionarCheckIns(pD1, new[] { 47, 68, 95, 112 });   // último: 47 dias atrás
+    AdicionarCheckIns(pD2, new[] { 52, 75, 100, 118 });  // último: 52 dias atrás
+    AdicionarCheckIns(pD3, new[] { 70, 90, 108, 115 });  // último: 70 dias atrás
+    await db.SaveChangesAsync();
+
+    await SoftDeleteAluno(pD1);
+    await SoftDeleteAluno(pD2);
+    await SoftDeleteAluno(pD3);
+
+    // ── 8. Perfil E — "Cold Start" (2 alunos) ────────────────────────────────
+    // Matriculados há 8 e 12 dias. Apenas 1–2 check-ins.
+    var pE1 = await CriarAluno("Isabela Torres",       "isabela.torres@vital.dev", planMensal, 8);
+    var pE2 = await CriarAluno("Pedro Henrique Gomes", "pedro.gomes@vital.dev",    planMensal, 12);
+
+    AdicionarCheckIns(pE1, new[] { 6 });           // 1 check-in
+    AdicionarCheckIns(pE2, new[] { 10, 7 });       // 2 check-ins
+    await db.SaveChangesAsync();
+
     logger.LogInformation(
-        "Seed concluído. Manager: admin@projectvital.dev | AcademyId={AcademyId}",
+        "Seed concluído: 20 alunos em 5 perfis (A=6,B=5,C=4,D=3 soft-deleted,E=2) | " +
+        "Manager: gestor@vital.dev | AcademyId={AcademyId}",
         academy.Id);
+
+    // ── 9. Predições iniciais (falha graciosamente se ML offline) ─────────────
+    try
+    {
+        var predicoes = await mlClient.PredictBatchAsync(academy.Id);
+        logger.LogInformation("Predições iniciais: {Count} alunos avaliados.", predicoes.Count);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(
+            "ML Service indisponível no seed — execute POST /predict/batch manualmente. Erro: {Msg}",
+            ex.Message);
+    }
 }
+
+// Make Program accessible for WebApplicationFactory in integration tests
+public partial class Program { }
