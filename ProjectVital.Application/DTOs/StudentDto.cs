@@ -47,4 +47,8 @@ public record StudentDto(
     string? PlanName,
     // Nullable: null quando aluno ainda não passou pelo ML Service
     PredictionDto? LatestPrediction
-);
+)
+{
+    /// <summary>Data do cancelamento (null se ativo) — distingue cancelamento ocorrido de risco previsto.</summary>
+    public DateTime? CancelledAt { get; init; }
+}

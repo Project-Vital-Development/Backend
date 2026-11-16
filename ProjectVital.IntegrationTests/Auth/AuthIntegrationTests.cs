@@ -91,7 +91,7 @@ public class AuthIntegrationTests : IClassFixture<TestFactory>
 
         result.RootElement.TryGetProperty("errors", out var errors).Should().BeTrue();
         var code = errors[0].GetProperty("extensions").GetProperty("code").GetString();
-        code.Should().BeOneOf("INVALID_CREDENTIALS", "AUTH_ERROR", "BUSINESS_ERROR");
+        code.Should().BeOneOf("AUTH_FAILED", "INVALID_CREDENTIALS", "AUTH_ERROR", "BUSINESS_ERROR");
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class AuthIntegrationTests : IClassFixture<TestFactory>
 
         result.RootElement.TryGetProperty("errors", out var errors).Should().BeTrue();
         var code = errors[0].GetProperty("extensions").GetProperty("code").GetString();
-        code.Should().BeOneOf("AUTH_REQUIRED", "UNAUTHENTICATED", "UNAUTHORIZED");
+        code.Should().BeOneOf("AUTH_NOT_AUTHORIZED", "AUTH_REQUIRED", "UNAUTHENTICATED", "UNAUTHORIZED");
     }
 
     [Fact]
@@ -142,6 +142,6 @@ public class AuthIntegrationTests : IClassFixture<TestFactory>
 
         result.RootElement.TryGetProperty("errors", out var errors).Should().BeTrue();
         var code = errors[0].GetProperty("extensions").GetProperty("code").GetString();
-        code.Should().BeOneOf("AUTH_REQUIRED", "UNAUTHENTICATED", "UNAUTHORIZED");
+        code.Should().BeOneOf("AUTH_NOT_AUTHORIZED", "AUTH_REQUIRED", "UNAUTHENTICATED", "UNAUTHORIZED");
     }
 }

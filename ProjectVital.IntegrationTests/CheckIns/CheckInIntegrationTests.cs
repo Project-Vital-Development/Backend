@@ -84,7 +84,13 @@ public class CheckInIntegrationTests : IClassFixture<TestFactory>
         var id = int.Parse(checkIn.GetProperty("id").GetString()!);
         id.Should().BeGreaterThan(0);
 
-        var timestamp = DateTime.Parse(checkIn.GetProperty("timestamp").GetString()!);
+        // O backend serializa o timestamp em UTC com offset; força o parse para UTC
+        // para comparar corretamente com DateTime.UtcNow (senão DateTime.Parse converte
+        // para o fuso local e a comparação falha em máquinas fora de UTC).
+        var timestamp = DateTime.Parse(
+            checkIn.GetProperty("timestamp").GetString()!,
+            null,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal);
         timestamp.Should().BeAfter(beforeCall).And.BeBefore(DateTime.UtcNow.AddSeconds(5));
 
         using var scope = _factory.Services.CreateScope();

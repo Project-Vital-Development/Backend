@@ -12,7 +12,7 @@ namespace ProjectVital.Application.DTOs;
 ///   SE O PYTHON MUDAR OS VALORES: atualizar o Enum.Parse em PredictionService.
 ///
 /// MODELVERSION:
-///   Formato: "rf_v1.2" (Random Forest) ou "xgb_v2.0" (XGBoost).
+///   Formato: "xgb_v{N}" (XGBoost; N = versão do treino da academia).
 ///   Indica qual versão do modelo gerou esta predição — rastreabilidade.
 /// </summary>
 public record MLPredictionResult(
@@ -20,7 +20,7 @@ public record MLPredictionResult(
     double Probability,
     // "low" | "medium" | "high" — string do Python, convertido para RiskLevel enum no service
     string RiskLevel,
-    // Ex: "rf_v1.2" — versão do modelo que gerou esta predição
+    // Ex: "xgb_v3" — versão do modelo que gerou esta predição
     string ModelVersion
 );
 
@@ -48,4 +48,8 @@ public record MLBatchPredictionItem(
     double Probability,
     // "low" | "medium" | "high" — string do Python, convertido para RiskLevel enum no service
     string RiskLevel
-);
+)
+{
+    /// <summary>Versão do modelo da academia que gerou a predição.</summary>
+    public string ModelVersion { get; init; } = string.Empty;
+}

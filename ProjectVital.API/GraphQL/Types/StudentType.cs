@@ -65,6 +65,7 @@ public class StudentType : ObjectType<StudentDto>
 
         // Active=false significa churn ocorreu — impacta feature "label" no ML
         descriptor.Field(s => s.Active).Type<NonNullType<BooleanType>>();
+        descriptor.Field(s => s.CancelledAt).Type<DateTimeType>();
 
         // Nullable: só preenchido quando StudentRepository.GetWithRelationsAsync inclui Plan
         descriptor.Field(s => s.PlanName).Type<StringType>();

@@ -76,7 +76,7 @@ public class PredictionService : IPredictionService
         {
             StudentId = studentId,
             Probability = mlResult.Probability,
-            RiskLevel = RiskLevelExtensions.FromProbability(mlResult.Probability),
+            RiskLevel = RiskLevelExtensions.FromModel(mlResult.RiskLevel, mlResult.Probability),
             ModelVersion = mlResult.ModelVersion,
             PredictedAt = DateTime.UtcNow,
         };
@@ -108,6 +108,14 @@ public class PredictionService : IPredictionService
     public async Task<IReadOnlyList<PredictionDto>> RunBatchAsync(int academyId, CancellationToken cancellationToken = default)
     {
         var batchItems = await _mlClient.PredictBatchAsync(academyId, cancellationToken);
+        if (batchItems.Count == 0)
+            return [];
+
+        // Defesa em profundidade: só grava predições de alunos ATIVOS desta academia,
+        // mesmo que o ML devolva algum id inesperado.
+        var allowed = (await _students.GetByAcademyIdAsync(academyId, true, cancellationToken))
+            .Select(s => s.Id).ToHashSet();
+        batchItems = batchItems.Where(i => allowed.Contains(i.StudentId)).ToList();
 
         var saved = new List<PredictionDto>(batchItems.Count);
         foreach (var item in batchItems)
@@ -116,8 +124,8 @@ public class PredictionService : IPredictionService
             {
                 StudentId = item.StudentId,
                 Probability = item.Probability,
-                RiskLevel = RiskLevelExtensions.FromProbability(item.Probability),
-                ModelVersion = string.Empty, // batch endpoint não retorna version por item
+                RiskLevel = RiskLevelExtensions.FromModel(item.RiskLevel, item.Probability),
+                ModelVersion = item.ModelVersion,
                 PredictedAt = DateTime.UtcNow,
             };
 

@@ -43,7 +43,8 @@ public class StudentQueryResolver
     [Authorize]
     public async Task<IReadOnlyList<StudentDto>> StudentsAsync(
         [ID] int academyId,
-        [Service] IStudentService studentService,
+        // ServiceKind.Resolver: scope/DbContext isolado por resolver (ver KPIResolver).
+        [Service(ServiceKind.Resolver)] IStudentService studentService,
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
@@ -62,7 +63,8 @@ public class StudentQueryResolver
     [Authorize]
     public async Task<StudentDto?> StudentAsync(
         [ID] int id,
-        [Service] IStudentService studentService,
+        // ServiceKind.Resolver: scope/DbContext isolado por resolver (ver KPIResolver).
+        [Service(ServiceKind.Resolver)] IStudentService studentService,
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
@@ -107,8 +109,9 @@ public class StudentMutationResolver
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
-        ResolverAuthHelper.EnforceAcademyAccess(httpContext, input.AcademyId);
-        return await studentService.RegisterAsync(input, cancellationToken);
+        // A academia gravada é a do TOKEN; o campo do input só é aceito se coincidir.
+        var academyId = ResolverAuthHelper.EnforceAcademyAccess(httpContext, input.AcademyId);
+        return await studentService.RegisterAsync(input with { AcademyId = academyId }, cancellationToken);
     }
 
     /// <summary>

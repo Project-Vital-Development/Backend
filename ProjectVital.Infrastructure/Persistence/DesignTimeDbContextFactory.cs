@@ -28,6 +28,6 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<ProjectVit
 
         optionsBuilder.UseMySql(connectionString, serverVersion);
 
-        return new ProjectVitalDbContext(optionsBuilder.Options);
+        return new ProjectVitalDbContext(optionsBuilder.Options, ProjectVital.Application.Interfaces.SystemTenantContext.Instance);
     }
 }

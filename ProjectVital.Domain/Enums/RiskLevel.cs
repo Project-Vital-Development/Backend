@@ -46,10 +46,24 @@ public static class RiskLevelExtensions
     /// Probability vem diretamente da resposta do ML Service (campo "probability").
     /// </summary>
     /// <param name="probability">Valor de 0.0 a 1.0 retornado pelo modelo ML.</param>
+    /// <summary>
+    /// Faixas fixas — usadas apenas como reserva quando o ML não informa o nível.
+    /// O nível oficial vem do ML (FromModel), calculado com o limiar validado do modelo
+    /// de cada academia: alto ≥ limiar; médio ≥ metade do limiar.
+    /// </summary>
     public static RiskLevel FromProbability(double probability)
     {
         if (probability < 0.3) return RiskLevel.Low;
         if (probability <= 0.6) return RiskLevel.Medium;
         return RiskLevel.High;
     }
+
+    /// <summary>Converte o risk_level do ML ("low" | "medium" | "high").</summary>
+    public static RiskLevel FromModel(string? riskLevel, double probability) => riskLevel?.ToLowerInvariant() switch
+    {
+        "low" => RiskLevel.Low,
+        "medium" => RiskLevel.Medium,
+        "high" => RiskLevel.High,
+        _ => FromProbability(probability),
+    };
 }

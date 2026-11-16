@@ -158,10 +158,26 @@ public class PredictionIntegrationTests : IClassFixture<TestFactory>, IDisposabl
         });
         await db.SaveChangesAsync();
 
+        // O ML (simulado) devolve os ativos desta academia + um id de OUTRA academia
+        // + o aluno inativo: só os ativos desta academia podem ser gravados.
+        var activeIds = await db.Students.IgnoreQueryFilters()
+            .Where(st => st.AcademyId == academyId && st.Active && st.DeletedAt == null)
+            .Select(st => st.Id).ToListAsync();
+        var inactiveId = await db.Students.IgnoreQueryFilters()
+            .Where(st => st.AcademyId == academyId && !st.Active).Select(st => st.Id).FirstAsync();
+        var items = activeIds.Append(inactiveId).Append(999_999)
+            .Select(id => $$"""{"student_id": {{id}}, "probability": 0.7, "risk_level": "high", "model_version": "test_v2"}""");
+        _wireMock.Server.ResetMappings();   // servidor simulado exclusivo deste teste
+        _wireMock.Server
+            .Given(WireMock.RequestBuilders.Request.Create().WithPath("/predict/batch").UsingPost())
+            .RespondWith(WireMock.ResponseBuilders.Response.Create().WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("[" + string.Join(",", items) + "]"));
+
         var mutation = $$"""
             mutation {
                 runBatchPrediction(academyId: "{{academyId}}") {
-                    studentId probability riskLevel
+                    studentId probability riskLevel modelVersion
                 }
             }
             """;
@@ -169,8 +185,10 @@ public class PredictionIntegrationTests : IClassFixture<TestFactory>, IDisposabl
 
         result.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
         var predictions = result.RootElement.GetProperty("data").GetProperty("runBatchPrediction");
-        // 3 active students (not 4 — inactive excluded)
-        predictions.GetArrayLength().Should().BeGreaterThanOrEqualTo(1);
+        var saved = predictions.EnumerateArray().Select(x => int.Parse(x.GetProperty("studentId").GetString()!)).ToList();
+        saved.Should().BeEquivalentTo(activeIds);
+        saved.Should().NotContain(999_999).And.NotContain(inactiveId);
+        predictions[0].GetProperty("modelVersion").GetString().Should().Be("test_v2");
     }
 
     [Fact]

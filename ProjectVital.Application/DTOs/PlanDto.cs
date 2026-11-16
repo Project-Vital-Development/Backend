@@ -3,7 +3,7 @@ namespace ProjectVital.Application.DTOs;
 /// <summary>
 /// DTO de plano de mensalidade — representa as opções de plano de uma academia.
 ///
-/// CRIADO POR: PlanService (não implementado ainda) ou consultas diretas ao repository
+/// CRIADO POR: PlanQueryResolver (consulta direta ao IPlanRepository; não há PlanService)
 /// RELACIONAMENTO: cada Student tem um PlanId (FK para Plan)
 ///
 /// MULTITENANT:

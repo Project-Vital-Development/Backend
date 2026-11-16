@@ -24,8 +24,8 @@ namespace ProjectVital.Application.Inputs;
 ///     Desativar muitos alunos de uma vez pode distorcer o próximo retreino.
 ///
 /// EMAIL (nullable):
-///   Se fornecido, o StudentService deve verificar unicidade (não implementado ainda).
-///   Risco: dois alunos com mesmo email causaria conflito de login.
+///   Se fornecido e diferente do atual, o StudentService verifica a unicidade
+///   (BusinessRuleException "E-mail ... já está em uso.").
 ///
 /// PLANID (nullable):
 ///   Se fornecido, deve pertencer à academia do aluno — validado em StudentService.
@@ -33,7 +33,7 @@ namespace ProjectVital.Application.Inputs;
 /// O QUE NÃO PODE SER ATUALIZADO AQUI:
 ///   AcademyId: alunos não trocam de academia (seria migração de tenant)
 ///   EnrollmentDate: imutável após criação (histórico)
-///   Password: requer endpoint separado (changePassword — não implementado)
+///   Password: fora do escopo (congelado) — alunos não fazem login; só gestores (AuthService)
 /// </summary>
 public record UpdateStudentInput(
     // null = manter nome atual; não-null = atualizar com valor fornecido

@@ -61,6 +61,22 @@ public class Student
     public bool Active { get; set; } = true;
 
     /// <summary>
+    /// Data/hora UTC do cancelamento da matrícula (null enquanto ativo).
+    /// Define o rótulo temporal do ML: o modelo aprende com o comportamento do aluno
+    /// ANTES desta data, e não com o que aconteceu depois dela.
+    /// Mantido por SetActive(): preenchido ao desativar, limpo ao reativar.
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+
+    /// <summary>Ativa/desativa mantendo CancelledAt consistente com Active.</summary>
+    public void SetActive(bool active, DateTime nowUtc)
+    {
+        if (Active == active) return;
+        Active = active;
+        CancelledAt = active ? null : nowUtc;
+    }
+
+    /// <summary>
     /// LGPD Art.18 — soft delete. Null = ativo; preenchido = excluído logicamente.
     /// O Global Query Filter em ProjectVitalDbContext garante invisibilidade automática.
     /// Chamado por StudentService.DeleteAsync() junto com User.SoftDelete().

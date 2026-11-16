@@ -61,7 +61,7 @@ public class PredictionServiceTests
             StudentId = 5,
             Probability = 0.75,
             RiskLevel = RiskLevel.High,
-            ModelVersion = "rf_v1.0",
+            ModelVersion = "xgb_v1",
             PredictedAt = DateTime.UtcNow
         };
 
@@ -106,9 +106,9 @@ public class PredictionServiceTests
         _studentRepo.Setup(r => r.GetByIdAsync(1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(student);
 
-        // Mock do Python retornando probability=0.8, risk="high", version="rf_v1.0"
+        // Mock do Python retornando probability=0.8, risk="high", version="xgb_v1"
         _mlClient.Setup(c => c.PredictAsync(1, 10, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new MLPredictionResult(0.8, "high", "rf_v1.0"));
+            .ReturnsAsync(new MLPredictionResult(0.8, "high", "xgb_v1"));
 
         // AddAsync retorna o mesmo objeto que recebeu (simula EF Core Add + Return)
         _predRepo.Setup(r => r.AddAsync(It.IsAny<Prediction>(), It.IsAny<CancellationToken>()))
@@ -121,7 +121,7 @@ public class PredictionServiceTests
         Assert.NotNull(result);
         Assert.Equal(0.8, result.Probability);
         Assert.Equal(RiskLevel.High, result.RiskLevel);
-        Assert.Equal("rf_v1.0", result.ModelVersion);
+        Assert.Equal("xgb_v1", result.ModelVersion);
         // CRÍTICO: verifica que a predição foi persistida — não apenas retornada
         _predRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -158,5 +158,29 @@ public class PredictionServiceTests
         Assert.Empty(result);
         // Verifica que não tentou persistir nada (lista vazia → sem SaveChanges)
         _predRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunBatchAsync_IgnoresStudentsOutsideAcademy()
+    {
+        _mlClient.Setup(c => c.PredictBatchAsync(10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MLBatchPredictionItem>
+            {
+                new(1, 0.8, "high") { ModelVersion = "xgb_v3" },
+                new(2, 0.1, "low") { ModelVersion = "xgb_v3" },
+                new(999, 0.9, "high") { ModelVersion = "xgb_v3" },   // aluno de outra academia
+            });
+        _studentRepo.Setup(r => r.GetByAcademyIdAsync(10, true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Student>
+            {
+                new() { Id = 1, AcademyId = 10, Active = true },
+                new() { Id = 2, AcademyId = 10, Active = true },
+            });
+
+        var result = await _sut.RunBatchAsync(10);
+
+        Assert.Equal(new[] { 1, 2 }, result.Select(p => p.StudentId).OrderBy(i => i));
+        Assert.All(result, p => Assert.Equal("xgb_v3", p.ModelVersion));
+        _predRepo.Verify(r => r.AddAsync(It.Is<Prediction>(p => p.StudentId == 999), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

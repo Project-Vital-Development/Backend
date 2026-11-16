@@ -16,4 +16,15 @@
     <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
   </PropertyGroup>
 
+  <!-- Correções de segurança em dependências TRANSITIVAS (auditadas com
+       `dotnet list package \-\-vulnerable \-\-include-transitive`):
+       System.Text.Json  < 8.0.4  → CVE-2024-30105 (negação de serviço)
+       MySqlConnector    < 2.6.1  → GHSA-473q-m89c-ghf8 (senha exposta em TLS sem verificação) -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'ProjectVital.Domain'">
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'ProjectVital.Infrastructure'">
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+  </ItemGroup>
+
 </Project>

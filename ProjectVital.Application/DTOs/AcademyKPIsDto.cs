@@ -34,11 +34,11 @@ public record AcademyKPIsDto(
     int AcademyId,
     int TotalStudents,
     int ActiveStudents,
-    // Contagem de alunos ativos com última predição RiskLevel=High (probability > 0.6)
+    // Alunos ativos cuja última predição é High (probabilidade ≥ limiar validado do modelo)
     int HighRiskCount,
-    // Contagem de alunos ativos com última predição RiskLevel=Medium (0.3 <= probability <= 0.6)
+    // Alunos ativos cuja última predição é Medium (≥ metade do limiar do modelo)
     int MediumRiskCount,
-    // Contagem de alunos ativos com última predição RiskLevel=Low (probability < 0.3)
+    // Alunos ativos cuja última predição é Low
     int LowRiskCount,
     // Total de check-ins nos últimos 7 dias em toda a academia
     int CheckInsThisWeek,

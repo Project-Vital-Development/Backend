@@ -44,8 +44,10 @@ public class CheckInQueryResolver
         [ID] int studentId,
         DateTime? from,
         DateTime? to,
-        [Service] ICheckInService checkInService,
-        [Service] IStudentService studentService,
+        // ServiceKind.Resolver: scope/DbContext isolado por resolver (ver KPIResolver).
+        // Ambos os serviços compartilham o MESMO scope deste resolver (sequencial, sem concorrência interna).
+        [Service(ServiceKind.Resolver)] ICheckInService checkInService,
+        [Service(ServiceKind.Resolver)] IStudentService studentService,
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
@@ -101,5 +103,20 @@ public class CheckInMutationResolver
 
         ResolverAuthHelper.EnforceAcademyAccess(httpContext, student.AcademyId);
         return await checkInService.RegisterAsync(studentId, cancellationToken);
+    }
+
+    /// <summary>Registra a saída do aluno (tempo de permanência da visita aberta).</summary>
+    [Authorize]
+    public async Task<CheckInDto> CheckOutAsync(
+        [ID] int studentId,
+        [Service] ICheckInService checkInService,
+        [Service] IStudentService studentService,
+        [Service] IHttpContextAccessor httpContext,
+        CancellationToken cancellationToken)
+    {
+        var student = await studentService.GetByIdAsync(studentId, cancellationToken)
+            ?? throw new NotFoundException("Student", studentId);
+        ResolverAuthHelper.EnforceAcademyAccess(httpContext, student.AcademyId);
+        return await checkInService.CheckOutAsync(studentId, cancellationToken);
     }
 }

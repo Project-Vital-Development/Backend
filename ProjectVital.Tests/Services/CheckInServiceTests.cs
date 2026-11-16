@@ -1,96 +1,116 @@
 using Moq;
-using Xunit;
 using ProjectVital.Application.Services;
 using ProjectVital.Domain.Entities;
+using ProjectVital.Domain.Exceptions;
 using ProjectVital.Domain.Interfaces;
+using Xunit;
 
 namespace ProjectVital.Tests.Services;
 
 /// <summary>
-/// Testes unitários de CheckInService.
-///
-/// ESTRATÉGIA DE TESTES:
-///   - Moq para ICheckInRepository e IStudentRepository (sem banco real)
-///   - Testa os 3 caminhos de RegisterAsync: sucesso, aluno inativo, aluno inexistente
-///
-/// POR QUE ESTES 3 CASOS SÃO CRÍTICOS:
-///   1. Aluno ativo → caminho feliz: check-in salvo, retorno com StudentId correto
-///   2. Aluno inativo → regra de negócio: não pode entrar na academia se cancelou
-///      AppErrorFilter mapeia InvalidOperationException → "BUSINESS_RULE_VIOLATION"
-///   3. Aluno inexistente → segurança: não deve criar check-in órfão
-///      AppErrorFilter mapeia KeyNotFoundException → "NOT_FOUND"
-///
-/// EXECUTAR: dotnet test --filter "FullyQualifiedName~CheckInServiceTests"
-///
-/// SE MUDAR A REGRA "aluno inativo não pode fazer check-in":
-///   Atualizar CheckInService.RegisterAsync() E atualizar este teste.
-///   O teste documenta o comportamento esperado — se o teste muda, a regra mudou.
+/// Regras de entrada/saída: aluno ativo, entrada duplicada, concorrência e permanência.
+/// Os repositórios são simulados (Moq) — sem banco.
 /// </summary>
 public class CheckInServiceTests
 {
-    private readonly Mock<ICheckInRepository> _checkInRepo;
-    private readonly Mock<IStudentRepository> _studentRepo;
+    private readonly Mock<ICheckInRepository> _checkInRepo = new();
+    private readonly Mock<IStudentRepository> _studentRepo = new();
+    private readonly List<CheckIn> _stored = [];
     private readonly CheckInService _sut;
 
     public CheckInServiceTests()
     {
-        _checkInRepo = new Mock<ICheckInRepository>();
-        _studentRepo = new Mock<IStudentRepository>();
+        _checkInRepo
+            .Setup(r => r.GetByStudentAsync(It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ReturnsAsync((int id, DateTime? from, DateTime? to, CancellationToken _, bool _) =>
+                _stored.Where(c => c.StudentId == id && (from == null || c.Timestamp >= from) && (to == null || c.Timestamp <= to)).ToList());
+        _checkInRepo
+            .Setup(r => r.AddAsync(It.IsAny<CheckIn>(), It.IsAny<CancellationToken>()))
+            .Callback((CheckIn c, CancellationToken _) => { lock (_stored) _stored.Add(c); })
+            .ReturnsAsync((CheckIn c, CancellationToken _) => c);
         _sut = new CheckInService(_checkInRepo.Object, _studentRepo.Object);
     }
 
-    /// <summary>
-    /// Aluno ativo deve poder fazer check-in com sucesso.
-    /// Verifica: retorno não-null, StudentId correto, SaveChanges chamado.
-    /// </summary>
+    private void GivenStudent(int id, bool active = true) =>
+        _studentRepo.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Student { Id = id, AcademyId = 1, Active = active });
+
     [Fact]
-    public async Task RegisterAsync_WithActiveStudent_CreatesCheckIn()
+    public async Task RegisterAsync_ActiveStudent_CreatesCheckInInUtc()
     {
-        var student = new Student { Id = 1, Active = true };
-        _studentRepo.Setup(r => r.GetByIdAsync(1, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(student);
+        GivenStudent(10);
+        var result = await _sut.RegisterAsync(10);
 
-        var checkIn = new CheckIn { Id = 1, StudentId = 1, Timestamp = DateTime.UtcNow };
-        _checkInRepo.Setup(r => r.AddAsync(It.IsAny<CheckIn>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(checkIn);
-        _checkInRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1);
-
-        var result = await _sut.RegisterAsync(1);
-
-        Assert.NotNull(result);
-        Assert.Equal(1, result.StudentId);
+        Assert.Equal(10, result.StudentId);
+        Assert.Null(result.DurationMinutes);
+        Assert.Equal(DateTimeKind.Utc, _stored.Single().Timestamp.Kind);
+        _checkInRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    /// <summary>
-    /// Aluno inativo (Active=false) não pode fazer check-in — regra de negócio.
-    /// AppErrorFilter mapeia InvalidOperationException → "BUSINESS_RULE_VIOLATION" no GraphQL.
-    ///
-    /// CENÁRIO REAL: aluno cancelou a matrícula mas ainda tenta entrar.
-    /// </summary>
     [Fact]
-    public async Task RegisterAsync_WithInactiveStudent_ThrowsInvalidOperation()
+    public async Task RegisterAsync_InactiveStudent_IsBusinessRuleViolation()
     {
-        var student = new Student { Id = 2, Active = false };
-        _studentRepo.Setup(r => r.GetByIdAsync(2, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(student);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _sut.RegisterAsync(2));
+        GivenStudent(20, active: false);
+        await Assert.ThrowsAsync<BusinessRuleException>(() => _sut.RegisterAsync(20));
+        Assert.Empty(_stored);
     }
 
-    /// <summary>
-    /// StudentId desconhecido deve lançar KeyNotFoundException.
-    /// Evita criar check-in órfão (sem Student vinculado) no banco.
-    /// AppErrorFilter mapeia → "NOT_FOUND" no GraphQL.
-    /// </summary>
     [Fact]
-    public async Task RegisterAsync_WithUnknownStudent_ThrowsKeyNotFound()
+    public async Task RegisterAsync_UnknownStudent_IsNotFound()
     {
-        _studentRepo.Setup(r => r.GetByIdAsync(99, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Student?)null);
+        await Assert.ThrowsAsync<NotFoundException>(() => _sut.RegisterAsync(999));
+    }
 
-        await Assert.ThrowsAsync<KeyNotFoundException>(
-            () => _sut.RegisterAsync(99));
+    [Fact]
+    public async Task RegisterAsync_WithOpenVisit_RejectsDuplicate()
+    {
+        GivenStudent(30);
+        await _sut.RegisterAsync(30);
+        await Assert.ThrowsAsync<BusinessRuleException>(() => _sut.RegisterAsync(30));
+        Assert.Single(_stored);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_ConcurrentRequests_CreateOnlyOneCheckIn()
+    {
+        GivenStudent(40);
+        var attempts = Enumerable.Range(0, 10).Select(async _ =>
+        {
+            try { await _sut.RegisterAsync(40); return true; }
+            catch (BusinessRuleException) { return false; }
+        });
+        var results = await Task.WhenAll(attempts);
+
+        Assert.Equal(1, results.Count(ok => ok));
+        Assert.Single(_stored, c => c.StudentId == 40);
+    }
+
+    [Fact]
+    public async Task CheckOutAsync_SetsDurationOfOpenVisit()
+    {
+        GivenStudent(50);
+        _stored.Add(new CheckIn { StudentId = 50, Timestamp = DateTime.UtcNow.AddMinutes(-75) });
+
+        var result = await _sut.CheckOutAsync(50);
+
+        Assert.InRange(result.DurationMinutes!.Value, 74, 76);
+        // Depois da saída, uma nova entrada é permitida
+        await _sut.RegisterAsync(50);
+        Assert.Equal(2, _stored.Count(c => c.StudentId == 50));
+    }
+
+    [Fact]
+    public async Task CheckOutAsync_WithoutOpenVisit_IsBusinessRuleViolation()
+    {
+        GivenStudent(60);
+        _stored.Add(new CheckIn { StudentId = 60, Timestamp = DateTime.UtcNow.AddHours(-6) });   // fora da janela
+        await Assert.ThrowsAsync<BusinessRuleException>(() => _sut.CheckOutAsync(60));
+    }
+
+    [Fact]
+    public async Task ListByStudentAsync_InvalidRange_IsRejected()
+    {
+        await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            _sut.ListByStudentAsync(1, DateTime.UtcNow, DateTime.UtcNow.AddDays(-1)));
     }
 }

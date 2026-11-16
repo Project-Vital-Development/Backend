@@ -15,7 +15,7 @@ namespace ProjectVital.Application.Interfaces;
 ///
 /// CONSUMERS DESTA INTERFACE:
 ///   - KPIResolver.AcademyKPIsAsync() — query do dashboard
-///   - Possível uso futuro: resolver de Academy CRUD (ainda não implementado)
+///   - CRUD de academias: fora do escopo do TCC (congelado); academias vêm do seed/administração
 ///
 /// SE ADICIONAR CRUD DE ACADEMIA:
 ///   Adicionar métodos aqui (CreateAsync, UpdateAsync, DeleteAsync).

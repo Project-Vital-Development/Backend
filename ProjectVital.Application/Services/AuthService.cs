@@ -37,6 +37,9 @@ namespace ProjectVital.Application.Services;
 /// </summary>
 public class AuthService : IAuthService
 {
+    public const string DefaultIssuer = "project-vital-api";
+    public const string DefaultAudience = "project-vital-web";
+
     private readonly IUserRepository _users;
     private readonly IAcademyRepository _academies;
     private readonly IConfiguration _config;
@@ -69,11 +72,16 @@ public class AuthService : IAuthService
     /// </summary>
     public async Task<AuthPayloadDto> LoginAsync(LoginInput input, CancellationToken cancellationToken = default)
     {
-        var user = await _users.GetByEmailAsync(input.Email, cancellationToken);
+        var user = await _users.GetByEmailAsync(input.Email.Trim(), cancellationToken);
 
         // Mensagem genérica intencional: evita user enumeration attack.
-        // Verificar BCrypt mesmo quando user é null protege contra timing attacks.
-        if (user is null || !VerifyPassword(input.Password, user.PasswordHash))
+        // O BCrypt roda SEMPRE (hash fictício quando o usuário não existe), para que o
+        // tempo de resposta não revele quais e-mails estão cadastrados.
+        var passwordOk = VerifyPassword(input.Password, user?.PasswordHash ?? DummyHash);
+
+        // Somente gestores usam o painel. Alunos não têm interface, e nenhum fluxo cria
+        // contas Admin — todos recebem a mesma resposta genérica.
+        if (user is null || !passwordOk || user.Role != UserRole.Manager)
             throw new UnauthorizedAccessException("Credenciais inválidas.");
 
         // Managers têm academyId no token para que os resolvers possam fazer tenant isolation.
@@ -104,6 +112,10 @@ public class AuthService : IAuthService
     /// corretamente (BCrypt.Verify detecta o factor do hash existente automaticamente).
     /// Apenas novos hashes usarão o novo factor.
     /// </summary>
+    // Hash BCrypt (work factor 12) de um valor aleatório descartado — só equaliza o tempo.
+    private static readonly string DummyHash =
+        BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("N"), workFactor: 12);
+
     public string HashPassword(string plainPassword)
         => BCrypt.Net.BCrypt.HashPassword(plainPassword, workFactor: 12);
 
@@ -151,7 +163,9 @@ public class AuthService : IAuthService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var expiryHours = int.TryParse(_config["Jwt:ExpiryHours"], out var h) ? h : 24;
+        // JWT_EXPIRY_HOURS (env) > Jwt:ExpiryHours (appsettings) > 8 h. Limitado a 1–24 h.
+        var expiryHours = int.TryParse(_config["JWT_EXPIRY_HOURS"] ?? _config["Jwt:ExpiryHours"], out var h) ? h : 8;
+        expiryHours = Math.Clamp(expiryHours, 1, 24);
         var expiresAt = DateTime.UtcNow.AddHours(expiryHours);
 
         var claims = new List<Claim>
@@ -167,6 +181,9 @@ public class AuthService : IAuthService
             claims.Add(new Claim("academyId", academyId.Value.ToString()));
 
         var tokenDescriptor = new JwtSecurityToken(
+            issuer: _config["JWT_ISSUER"] ?? DefaultIssuer,
+            audience: _config["JWT_AUDIENCE"] ?? DefaultAudience,
+            notBefore: DateTime.UtcNow,
             claims: claims,
             expires: expiresAt,
             signingCredentials: credentials);

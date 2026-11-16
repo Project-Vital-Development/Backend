@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ProjectVital.Application.Interfaces;
 using ProjectVital.Domain.Entities;
 
 namespace ProjectVital.Infrastructure.Persistence;
@@ -30,9 +31,18 @@ namespace ProjectVital.Infrastructure.Persistence;
 /// </summary>
 public class ProjectVitalDbContext : DbContext
 {
-    public ProjectVitalDbContext(DbContextOptions<ProjectVitalDbContext> options) : base(options)
+    private readonly ITenantContext _tenant;
+
+    public ProjectVitalDbContext(DbContextOptions<ProjectVitalDbContext> options, ITenantContext tenant)
+        : base(options)
     {
+        _tenant = tenant;
     }
+
+    // Lidas pelos filtros globais a cada query (o EF parametriza membros do DbContext;
+    // valores capturados seriam congelados no modelo em cache).
+    public bool TenantIsSystem => _tenant.IsSystem;
+    public int TenantAcademyId => _tenant.AcademyId;
 
     // ── DbSets — cada um representa uma tabela no MySQL ───────────────────────────
 
@@ -82,7 +92,22 @@ public class ProjectVitalDbContext : DbContext
         //   2. Adicionar HasQueryFilter aqui
         //   3. Criar migration para adicionar a coluna
         modelBuilder.Entity<User>().HasQueryFilter(u => u.DeletedAt == null);
-        modelBuilder.Entity<Student>().HasQueryFilter(s => s.DeletedAt == null);
+
+        // ── Global Query Filters — Isolamento por academia (multi-tenant) ────────
+        // Segunda barreira, além das checagens nos resolvers: mesmo que um resolver
+        // esqueça de validar a academia, o banco só devolve linhas da academia do JWT.
+        // EF Core 8 aceita UM filtro por entidade — soft delete e tenant ficam juntos.
+        // NUNCA usar IgnoreQueryFilters() em código acionado por requisição HTTP.
+        modelBuilder.Entity<Student>().HasQueryFilter(s =>
+            s.DeletedAt == null && (TenantIsSystem || s.AcademyId == TenantAcademyId));
+        modelBuilder.Entity<Academy>().HasQueryFilter(a =>
+            TenantIsSystem || a.Id == TenantAcademyId);
+        modelBuilder.Entity<Plan>().HasQueryFilter(p =>
+            TenantIsSystem || p.AcademyId == TenantAcademyId);
+        modelBuilder.Entity<CheckIn>().HasQueryFilter(c =>
+            TenantIsSystem || c.Student.AcademyId == TenantAcademyId);
+        modelBuilder.Entity<Prediction>().HasQueryFilter(p =>
+            TenantIsSystem || p.Student.AcademyId == TenantAcademyId);
 
         base.OnModelCreating(modelBuilder);
     }

@@ -3,28 +3,25 @@ using HotChocolate.Authorization;
 using HotChocolate.Types;
 using Microsoft.AspNetCore.Http;
 using ProjectVital.API.GraphQL.Helpers;
-using ProjectVital.Domain.Entities;
+using ProjectVital.Application.DTOs;
 using ProjectVital.Domain.Interfaces;
 
 namespace ProjectVital.API.GraphQL.Resolvers;
 
-/// <summary>
-/// Resolver GraphQL de queries de planos.
-/// Expõe "plans(academyId: ID!)" — lista planos disponíveis de uma academia.
-///
-/// USO PRINCIPAL: formulário de cadastro/edição de alunos (select de plano).
-/// </summary>
 [ExtendObjectType(OperationTypeNames.Query)]
 public class PlanQueryResolver
 {
     [Authorize]
-    public async Task<IReadOnlyList<Plan>> PlansAsync(
+    public async Task<IReadOnlyList<PlanDto>> PlansAsync(
         [ID] int academyId,
-        [Service] IPlanRepository planRepository,
+        // ServiceKind.Resolver: scope/DbContext isolado por resolver (ver KPIResolver).
+        [Service(ServiceKind.Resolver)] IPlanRepository planRepository,
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {
         ResolverAuthHelper.EnforceAcademyAccess(httpContext, academyId);
-        return await planRepository.GetByAcademyIdAsync(academyId, cancellationToken);
+        var plans = await planRepository.GetByAcademyIdAsync(academyId, cancellationToken);
+        return plans.Select(p => new PlanDto(p.Id, p.AcademyId, p.Name, p.Price, p.DurationDays))
+                    .ToList();
     }
 }

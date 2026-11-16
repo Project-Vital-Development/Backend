@@ -64,16 +64,21 @@ public interface IMLServiceClient
     /// <summary>
     /// Chama POST /retrain para retreinar o modelo ML para uma academia.
     ///
-    /// Python treina Random Forest + XGBoost com dados históricos da academia,
-    /// seleciona o melhor por F1-score e salva como novo arquivo versionado.
+    /// Python treina o XGBoost com os dados históricos da academia (hiperparâmetros fixos,
+    /// definidos em ml-service/benchmark/tune_xgboost.py) e salva como novo arquivo versionado.
     /// NUNCA sobrescreve o modelo anterior.
     ///
     /// PODE DEMORAR: retreino é computacionalmente intenso — não chamar em loops.
-    /// Recomendado: agendar periodicamente (semanal/mensal).
     ///
-    /// NOTA: ainda não integrado ao resolver (ver retrainModel placeholder).
-    ///
-    /// CHAMADO POR: PredictionMutationResolver.RetrainModelAsync() — quando implementado
+    /// CHAMADO POR: PredictionMutationResolver.RetrainModelAsync() e seed de demonstração.
     /// </summary>
     Task<RetrainResultDto> RetrainAsync(int academyId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Chama GET /model/report?academy_id=: relatório do último treino DA ACADEMIA (comparação dos três
+    /// algoritmos + importância das variáveis). Retorna null se ainda não houve treino.
+    ///
+    /// CHAMADO POR: PredictionQueryResolver.ModelReportAsync() e seed (verifica se há modelo).
+    /// </summary>
+    Task<RetrainResultDto?> GetModelReportAsync(int academyId, CancellationToken cancellationToken = default);
 }

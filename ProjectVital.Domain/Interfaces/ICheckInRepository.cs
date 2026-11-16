@@ -11,11 +11,13 @@ public interface ICheckInRepository : IRepository<CheckIn>
     /// Lista check-ins de um aluno, opcionalmente filtrando por intervalo de datas.
     /// Resultados ordenados por Timestamp descendente.
     /// </summary>
+    /// <param name="track">true = entidades rastreadas pelo EF (para alterar e salvar, ex.: check-out).</param>
     Task<IReadOnlyList<CheckIn>> GetByStudentAsync(
         int studentId,
         DateTime? from = null,
         DateTime? to = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool track = false);
 
     /// <summary>Conta check-ins de um aluno em um intervalo (usado em KPIs).</summary>
     Task<int> CountByStudentAsync(

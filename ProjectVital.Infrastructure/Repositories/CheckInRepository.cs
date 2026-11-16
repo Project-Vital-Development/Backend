@@ -41,10 +41,10 @@ public class CheckInRepository : Repository<CheckIn>, ICheckInRepository
         int studentId,
         DateTime? from = null,
         DateTime? to = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool track = false)
     {
-        var query = Set
-            .AsNoTracking()
+        var query = (track ? Set : Set.AsNoTracking())
             .Where(c => c.StudentId == studentId);
 
         if (from.HasValue)

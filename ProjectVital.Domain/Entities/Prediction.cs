@@ -43,7 +43,7 @@ public class Prediction
     ///   - RiskLevelExtensions.FromProbability() (backend .NET)
     ///   - _classify_risk() em predictor.py (Python)
     ///   - riskConfig em Badge.tsx e getRiskColor em RiskBar.tsx (frontend)
-    ///   — todos devem usar os mesmos thresholds: &lt;0.3=low, 0.3-0.6=medium, &gt;0.6=high
+    ///   — o nível vem do ML (limiar validado do modelo da academia); FromProbability é só reserva
     /// </summary>
     public double Probability { get; set; }
 
@@ -55,8 +55,9 @@ public class Prediction
     public RiskLevel RiskLevel { get; set; }
 
     /// <summary>
-    /// Identificador da versão do modelo que gerou a predição (ex: "rf_v1", "xgb_v2").
-    /// Formato: {prefix}_{version} onde prefix ∈ {"rf", "xgb"}.
+    /// Identificador da versão do modelo que gerou a predição (ex: "xgb_v2").
+    /// Formato: {prefix}_{version}; hoje o prefixo é sempre "xgb" (registros anteriores a
+    /// 2026-11 podem ter "rf", do modelo que foi removido).
     /// Permite rastrear qual modelo gerou cada predição — útil para auditoria
     /// e para saber se predições antigas usaram um modelo obsoleto.
     /// Gerado por trainer.py e retornado via MLServiceClient.PredictAsync().

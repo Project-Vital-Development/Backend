@@ -67,7 +67,11 @@ public class KPIResolver
     [Authorize]
     public async Task<AcademyKPIsDto> AcademyKPIsAsync(
         [ID] int academyId,
-        [Service] IAcademyService academyService,
+        // ServiceKind.Resolver: novo DI scope (e novo DbContext) por resolver — evita
+        // colisão de DbContext quando este root field roda em paralelo com `predictions`
+        // (Hot Chocolate executa campos-irmãos concorrentemente). Mutations mantêm o
+        // scope compartilhado do request para preservar a atomicidade do SaveChanges.
+        [Service(ServiceKind.Resolver)] IAcademyService academyService,
         [Service] IHttpContextAccessor httpContext,
         CancellationToken cancellationToken)
     {

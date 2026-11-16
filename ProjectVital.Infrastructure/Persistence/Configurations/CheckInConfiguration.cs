@@ -14,9 +14,9 @@ namespace ProjectVital.Infrastructure.Persistence.Configurations;
 ///
 /// POR QUE CHECK-INS SÃO CRÍTICOS:
 ///   Cada registro de check-in é a matéria-prima do sistema de predição de churn.
-///   O serviço Python lê TODOS os check-ins de um aluno para calcular as 5 features
-///   comportamentais (avg_weekly_frequency, days_since_last_checkin, avg_interval_days,
-///   frequency_trend, total_checkins). Sem check-ins, o ML não consegue fazer predições.
+///   O serviço Python lê TODOS os check-ins de um aluno para calcular as 15 features
+///   comportamentais (ml-service/features/engineering.py). Sem check-ins, o ML não
+///   consegue fazer predições.
 ///
 /// FK BEHAVIOR — CASCADE (diferente das outras entidades):
 ///   DeleteBehavior.Cascade = se um Student for deletado no banco, todos os seus

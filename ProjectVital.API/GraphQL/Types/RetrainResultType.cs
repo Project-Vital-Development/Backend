@@ -4,62 +4,144 @@ using ProjectVital.Application.DTOs;
 namespace ProjectVital.API.GraphQL.Types;
 
 /// <summary>
-/// Define o tipo GraphQL "RetrainResult" a partir de RetrainResultDto.
-/// Retornado pela mutation "retrainModel" — indica se o retreino do modelo ML teve sucesso.
-///
-/// SCHEMA GERADO:
-///   type RetrainResult {
-///     success: Boolean!
-///     message: String!
-///     modelVersion: String    # nullable — null se o retreino falhou
-///     f1Score: Float          # nullable — null se o retreino falhou
-///     aucRoc: Float           # nullable — null se o retreino falhou
-///   }
-///
-/// STATUS ATUAL:
-///   RetrainModelAsync em PredictionMutationResolver é um PLACEHOLDER.
-///   Atualmente retorna Success=false com uma mensagem de "será implementado na Fase 4".
-///   Quando implementado, chamará MLServiceClient.RetrainAsync() que chama POST /retrain.
-///
-/// CAMPOS NULLABLE:
-///   ModelVersion, F1Score e AucRoc são nullable porque em caso de falha o Python
-///   não retorna essas informações — apenas status="error" e message com o motivo.
-///
-/// COMO INTERPRETAR NO FRONTEND:
-///   if (retrainModel.success) {
-///     // mostrar nova versão do modelo e métricas
-///     // ex: "Modelo rf_v2 treinado com F1=0.84"
-///   } else {
-///     // mostrar retrainModel.message como erro
-///   }
-///
-/// MÉTRICAS DISPONÍVEIS:
-///   F1Score: balanceamento entre precisão e recall (mais importante para churn)
-///   AucRoc: área sob a curva ROC — capacidade de separação das classes
-///   Precision e Recall: calculados pelo Python mas não expostos aqui (expandir se necessário)
-///
-/// FONTE DE DADOS: RetrainResultDto (Application/DTOs/RetrainResultDto.cs)
-///   Populado por: MLServiceClient.RetrainAsync() → quando implementado
+/// Tipo GraphQL "RetrainResult" — relatório de treino de UMA academia
+/// (mutation retrainModel e query modelReport). Campos explícitos: nada além do
+/// declarado aqui é exposto no schema.
 /// </summary>
 public class RetrainResultType : ObjectType<RetrainResultDto>
 {
-    protected override void Configure(IObjectTypeDescriptor<RetrainResultDto> descriptor)
+    protected override void Configure(IObjectTypeDescriptor<RetrainResultDto> d)
     {
-        descriptor.Name("RetrainResult");
+        d.Name("RetrainResult");
+        d.BindFieldsExplicitly();
+        d.Field(r => r.Success).Type<NonNullType<BooleanType>>();
+        d.Field(r => r.Message).Type<NonNullType<StringType>>();
+        d.Field(r => r.ModelVersion);
+        d.Field(r => r.BestAlgorithm);
+        d.Field(r => r.SelectionMetric);
+        d.Field(r => r.TrainedAt);
+        d.Field(r => r.HorizonDays);
+        d.Field(r => r.Threshold);
+        d.Field(r => r.F1Score);
+        d.Field(r => r.AucRoc);
+        d.Field(r => r.Accuracy);
+        d.Field(r => r.Precision);
+        d.Field(r => r.Recall);
+        d.Field(r => r.PrAuc);
+        d.Field(r => r.Dataset).Type<TrainingDatasetType>();
+        d.Field(r => r.Comparison).Type<NonNullType<ListType<NonNullType<ModelMetricsType>>>>();
+        d.Field(r => r.Baselines).Type<NonNullType<ListType<NonNullType<ModelMetricsType>>>>();
+        d.Field(r => r.FeatureImportance).Type<NonNullType<ListType<NonNullType<FeatureImportanceType>>>>();
+        d.Field(r => r.ThresholdAnalysis).Type<NonNullType<ListType<NonNullType<ThresholdPointType>>>>();
+        d.Field(r => r.Calibration).Type<NonNullType<ListType<NonNullType<CalibrationBinType>>>>();
+        d.Field(r => r.Versions).Type<NonNullType<ListType<NonNullType<KeyValueType>>>>();
+    }
+}
 
-        // true = modelo treinado com sucesso e salvo; false = falhou (ver message)
-        descriptor.Field(r => r.Success).Type<NonNullType<BooleanType>>();
+public class ModelMetricsType : ObjectType<ModelMetricsDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<ModelMetricsDto> d)
+    {
+        d.Name("ModelMetrics");
+        d.BindFieldsExplicitly();
+        d.Field(m => m.Algorithm).Type<NonNullType<StringType>>();
+        d.Field(m => m.Accuracy);
+        d.Field(m => m.Precision);
+        d.Field(m => m.Recall);
+        d.Field(m => m.F1Score);
+        d.Field(m => m.AucRoc);
+        d.Field(m => m.PrAuc);
+        d.Field(m => m.Brier);
+        d.Field(m => m.Threshold);
+        d.Field(m => m.Confusion).Type<ConfusionMatrixType>();
+        d.Field(m => m.CvF1Mean);
+        d.Field(m => m.CvF1Std);
+        d.Field(m => m.CvPrAucMean);
+        d.Field(m => m.CvPrAucStd);
+        d.Field(m => m.BestParams);
+    }
+}
 
-        // Mensagem humana: motivo do sucesso ou do erro
-        descriptor.Field(r => r.Message).Type<NonNullType<StringType>>();
+public class ConfusionMatrixType : ObjectType<ConfusionMatrixDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<ConfusionMatrixDto> d)
+    {
+        d.Name("ConfusionMatrix");
+        d.BindFieldsExplicitly();
+        d.Field(c => c.TrueNegatives);
+        d.Field(c => c.FalsePositives);
+        d.Field(c => c.FalseNegatives);
+        d.Field(c => c.TruePositives);
+    }
+}
 
-        // Ex: "rf_v2.0" — null se Success=false
-        descriptor.Field(r => r.ModelVersion).Type<StringType>();
+public class FeatureImportanceType : ObjectType<FeatureImportanceDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<FeatureImportanceDto> d)
+    {
+        d.Name("FeatureImportance");
+        d.BindFieldsExplicitly();
+        d.Field(f => f.Algorithm).Type<NonNullType<StringType>>();
+        d.Field(f => f.Feature).Type<NonNullType<StringType>>();
+        d.Field(f => f.Importance);
+    }
+}
 
-        // F1-score do melhor modelo selecionado — null se Success=false
-        descriptor.Field(r => r.F1Score).Type<FloatType>();
+public class ThresholdPointType : ObjectType<ThresholdPointDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<ThresholdPointDto> d)
+    {
+        d.Name("ThresholdPoint");
+        d.BindFieldsExplicitly();
+        d.Field(t => t.Algorithm).Type<NonNullType<StringType>>();
+        d.Field(t => t.Threshold);
+        d.Field(t => t.Precision);
+        d.Field(t => t.Recall);
+        d.Field(t => t.F1Score);
+        d.Field(t => t.Flagged);
+    }
+}
 
-        // AUC-ROC do melhor modelo — null se Success=false
-        descriptor.Field(r => r.AucRoc).Type<FloatType>();
+public class CalibrationBinType : ObjectType<CalibrationBinDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<CalibrationBinDto> d)
+    {
+        d.Name("CalibrationBin");
+        d.BindFieldsExplicitly();
+        d.Field(c => c.Algorithm).Type<NonNullType<StringType>>();
+        d.Field(c => c.BinLow);
+        d.Field(c => c.BinHigh);
+        d.Field(c => c.Count);
+        d.Field(c => c.MeanPredicted);
+        d.Field(c => c.ObservedRate);
+    }
+}
+
+public class KeyValueType : ObjectType<KeyValueDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<KeyValueDto> d)
+    {
+        d.Name("KeyValue");
+        d.BindFieldsExplicitly();
+        d.Field(k => k.Key).Type<NonNullType<StringType>>();
+        d.Field(k => k.Value).Type<NonNullType<StringType>>();
+    }
+}
+
+public class TrainingDatasetType : ObjectType<TrainingDatasetDto>
+{
+    protected override void Configure(IObjectTypeDescriptor<TrainingDatasetDto> d)
+    {
+        d.Name("TrainingDataset");
+        d.BindFieldsExplicitly();
+        d.Field(x => x.Students);
+        d.Field(x => x.Churned);
+        d.Field(x => x.ChurnRate);
+        d.Field(x => x.TrainSize);
+        d.Field(x => x.TestSize);
+        d.Field(x => x.Excluded);
+        d.Field(x => x.Samples);
+        d.Field(x => x.TrainStudents);
+        d.Field(x => x.TestStudents);
     }
 }

@@ -1,43 +1,99 @@
 namespace ProjectVital.Application.DTOs;
 
 /// <summary>
-/// Resultado da operação de retreinamento do modelo ML.
-/// Retornado pela mutation "retrainModel" e criado por MLServiceClient.RetrainAsync().
+/// Resultado de um treino do modelo de evasão DE UMA ACADEMIA.
+/// Retornado pela mutation "retrainModel" e pela query "modelReport".
 ///
-/// CRIADO POR:
-///   - MLServiceClient.RetrainAsync() — mapeia resposta JSON do Python
-///   - PredictionMutationResolver.RetrainModelAsync() — placeholder atual retorna
-///     RetrainResultDto(false, "será implementado na Fase 4", null, null, null)
-///
-/// EXPOSTO COMO TIPO GRAPHQL: RetrainResultType.cs
-///
-/// CAMPOS NULLABLE:
-///   ModelVersion, F1Score e AucRoc são null quando Success=false.
-///   O Python não retorna esses campos em caso de falha no retreino.
-///
-/// COMO INTERPRETAR:
-///   Success=true  → modelo retreinado e salvo. ModelVersion é a nova versão.
-///                   F1Score e AucRoc indicam a qualidade do modelo.
-///   Success=false → Message explica o motivo da falha.
-///                   Causas comuns: dados insuficientes, erro no Python, academia vazia.
-///
-/// F1SCORE (métrica principal para churn):
-///   Harmônica entre precisão e recall — mais relevante que accuracy para classes desbalanceadas.
-///   Valor ideal > 0.80. Abaixo de 0.70 indica dados insuficientes ou features inadequadas.
-///
-/// AUCROC:
-///   Área sob a curva ROC — capacidade do modelo de separar churners de não-churners.
-///   0.5 = aleatório, 1.0 = perfeito. Ideal > 0.85 para produção.
+/// Métricas do holdout (25% dos alunos; o mesmo conjunto para o XGBoost e para as regras de
+/// referência), calculadas com probabilidades calibradas e com o limiar sugerido (escolhido no
+/// treino, nunca no teste). SelectionMetric: métrica que fixou os hiperparâmetros no estudo offline.
 /// </summary>
 public record RetrainResultDto(
-    // true = modelo treinado com sucesso; false = falhou (ver Message)
     bool Success,
-    // Mensagem humana — motivo do sucesso ou do erro
     string Message,
-    // "rf_v2.0" ou "xgb_v1.3" — null se Success=false
     string? ModelVersion,
-    // F1-score do melhor modelo (0.0–1.0) — null se Success=false
     double? F1Score,
-    // AUC-ROC do melhor modelo (0.0–1.0) — null se Success=false
     double? AucRoc
-);
+)
+{
+    public double? Accuracy { get; init; }
+    public double? Precision { get; init; }
+    public double? Recall { get; init; }
+    public double? PrAuc { get; init; }
+
+    /// <summary>Algoritmo do modelo em uso: sempre "xgboost".</summary>
+    public string? BestAlgorithm { get; init; }
+    public string? SelectionMetric { get; init; }
+    public string? TrainedAt { get; init; }
+
+    /// <summary>Horizonte da previsão: probabilidade de cancelar nos próximos N dias.</summary>
+    public int? HorizonDays { get; init; }
+
+    /// <summary>Limiar de classificação sugerido para o modelo em uso.</summary>
+    public double? Threshold { get; init; }
+
+    public TrainingDatasetDto? Dataset { get; init; }
+    public IReadOnlyList<ModelMetricsDto> Comparison { get; init; } = [];
+    public IReadOnlyList<ModelMetricsDto> Baselines { get; init; } = [];
+    public IReadOnlyList<FeatureImportanceDto> FeatureImportance { get; init; } = [];
+    public IReadOnlyList<ThresholdPointDto> ThresholdAnalysis { get; init; } = [];
+    public IReadOnlyList<CalibrationBinDto> Calibration { get; init; } = [];
+    public IReadOnlyList<KeyValueDto> Versions { get; init; } = [];
+}
+
+/// <summary>Métricas de um algoritmo (ou baseline) no holdout + estatísticas da validação cruzada.</summary>
+public record ModelMetricsDto(
+    string Algorithm,
+    double Accuracy,
+    double Precision,
+    double Recall,
+    double F1Score,
+    double AucRoc
+)
+{
+    public double PrAuc { get; init; }
+    public double Brier { get; init; }
+    public double Threshold { get; init; }
+    public ConfusionMatrixDto? Confusion { get; init; }
+    public double? CvF1Mean { get; init; }
+    public double? CvF1Std { get; init; }
+    public double? CvPrAucMean { get; init; }
+    public double? CvPrAucStd { get; init; }
+
+    /// <summary>Hiperparâmetros escolhidos na validação cruzada (JSON compacto).</summary>
+    public string? BestParams { get; init; }
+}
+
+public record ConfusionMatrixDto(int TrueNegatives, int FalsePositives, int FalseNegatives, int TruePositives);
+
+/// <summary>Importância de uma variável (queda média da PR-AUC ao embaralhá-la). Associação, não causalidade.</summary>
+public record FeatureImportanceDto(string Algorithm, string Feature, double Importance);
+
+/// <summary>Desempenho de um algoritmo em um limiar de classificação.</summary>
+public record ThresholdPointDto(string Algorithm, double Threshold, double Precision, double Recall, double F1Score, int Flagged);
+
+/// <summary>Faixa de calibração: probabilidade média prevista × taxa real de cancelamento.</summary>
+public record CalibrationBinDto(string Algorithm, double BinLow, double BinHigh, int Count, double MeanPredicted, double ObservedRate);
+
+public record KeyValueDto(string Key, string Value);
+
+/// <summary>
+/// Tamanho e balanceamento da base. Students = alunos distintos; TrainSize/TestSize e
+/// Churned contam AMOSTRAS (fotografias). Treino e teste são separados por aluno.
+/// </summary>
+public record TrainingDatasetDto(
+    int Students,
+    int Churned,
+    double ChurnRate,
+    int TrainSize,
+    int TestSize
+)
+{
+    /// <summary>Alunos fora do treino (pouco tempo de matrícula ou cancelamento sem data).</summary>
+    public int Excluded { get; init; }
+
+    /// <summary>Amostras ("fotografias" aluno × data); um aluno gera várias.</summary>
+    public int Samples { get; init; }
+    public int TrainStudents { get; init; }
+    public int TestStudents { get; init; }
+}

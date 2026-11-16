@@ -22,13 +22,11 @@ public class TestFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 d => d.ServiceType == typeof(DbContextOptions<ProjectVitalDbContext>));
             if (descriptor != null) services.Remove(descriptor);
 
-            // Add test DB (SQLite in-memory per test class)
+            // Docker MySQL expõe na porta 3307 do host (mapeado de 3306 interno)
+            var connStr = $"Server=localhost;Port=3307;Database={_dbName};Uid=root;Pwd=rootpassword123;";
             services.AddDbContext<ProjectVitalDbContext>(options =>
             {
-                options.UseMySql(
-                    $"Server=localhost;Port=3306;Database={_dbName};Uid=root;Pwd=rootpassword123;",
-                    ServerVersion.AutoDetect($"Server=localhost;Port=3306;Database={_dbName};Uid=root;Pwd=rootpassword123;")
-                );
+                options.UseMySql(connStr, ServerVersion.AutoDetect(connStr));
             });
 
             // Override ML_SERVICE_URL to WireMock

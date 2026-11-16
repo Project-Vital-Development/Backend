@@ -15,17 +15,18 @@ namespace ProjectVital.Application.DTOs;
 /// TAMBÉM USADO COMO CAMPO ANINHADO em StudentDto.LatestPrediction
 ///
 /// PROBABILITY:
-///   Valor contínuo 0.0–1.0 calculado pelo modelo ML (Random Forest ou XGBoost).
+///   Valor contínuo 0.0–1.0 calculado pelo modelo ML (XGBoost).
 ///   Representa a probabilidade de o aluno cancelar a matrícula nos próximos N dias.
 ///   Quanto maior, maior o risco — exibir como porcentagem no frontend.
 ///
 /// RISKLEVEL:
 ///   Derivado de Probability via RiskLevelExtensions.FromProbability() em RiskLevel.cs.
-///   Thresholds: <0.3=Low, 0.3–0.6=Medium, >0.6=High.
+///   Nível calculado pelo ML com o limiar validado do modelo da academia
+///   (alto ≥ limiar, atenção ≥ limiar/2). Faixas fixas só como reserva (FromProbability).
 ///   SE MUDAR OS THRESHOLDS: atualizar também _classify_risk() no Python, Badge.tsx e RiskBar.tsx.
 ///
 /// MODELVERSION:
-///   Formato: "rf_v1.2" (Random Forest) ou "xgb_v2.0" (XGBoost).
+///   Formato: "xgb_v{N}" (XGBoost; N = versão do treino da academia).
 ///   Permite rastrear qual versão do modelo gerou cada predição.
 ///   PODE SER string.Empty em predições batch — bug conhecido (ver MLServiceClient.PredictBatchAsync).
 ///
@@ -42,7 +43,7 @@ public record PredictionDto(
     double Probability,
     // Enum calculado a partir de Probability via RiskLevelExtensions.FromProbability()
     RiskLevel RiskLevel,
-    // "rf_v1.2" ou similar. string.Empty em predições batch (limitação conhecida).
+    // "xgb_v3" ou similar. string.Empty em predições batch (limitação conhecida).
     string ModelVersion,
     // UTC — quando o ML Service processou (não quando foi solicitado)
     DateTime PredictedAt

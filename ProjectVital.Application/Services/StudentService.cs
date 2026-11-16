@@ -35,17 +35,31 @@ public class StudentService : IStudentService
     private readonly IUserRepository _users;
     private readonly IPredictionRepository _predictions;
     private readonly IAuthService _auth;
+    private readonly IPlanRepository _plans;
 
     public StudentService(
         IStudentRepository students,
         IUserRepository users,
         IPredictionRepository predictions,
-        IAuthService auth)
+        IAuthService auth,
+        IPlanRepository plans)
     {
         _students = students;
         _users = users;
         _predictions = predictions;
         _auth = auth;
+        _plans = plans;
+    }
+
+    /// <summary>
+    /// Impede atribuir a um aluno um plano de OUTRA academia (IDOR/mass assignment).
+    /// Mensagem genérica: não revela se o plano existe em outra academia.
+    /// </summary>
+    private async Task EnsurePlanBelongsToAcademyAsync(int planId, int academyId, CancellationToken ct)
+    {
+        var plan = await _plans.GetByIdAsync(planId, ct);
+        if (plan is null || plan.AcademyId != academyId)
+            throw new BusinessRuleException("Plano inválido para esta academia.");
     }
 
     /// <summary>
@@ -64,8 +78,17 @@ public class StudentService : IStudentService
         CancellationToken cancellationToken = default)
     {
         var students = await _students.GetByAcademyIdAsync(academyId, activeOnly, cancellationToken);
-        // MapToDto sem predição — predição não é carregada na listagem (performance)
-        return students.Select(s => MapToDto(s)).ToList().AsReadOnly();
+
+        // Carrega a última predição de CADA aluno em UMA query (subquery MAX — sem N+1)
+        // e indexa por StudentId, para que a listagem exiba o risco atual de cada aluno
+        // (coluna "Risco" da StudentsPage). Alunos sem predição ficam com null → "Sem predição".
+        var latest = await _predictions.GetLatestByAcademyAsync(academyId, cancellationToken);
+        var latestByStudent = latest.ToDictionary(p => p.StudentId, MapPredictionToDto);
+
+        return students
+            .Select(s => MapToDto(s, latestByStudent.GetValueOrDefault(s.Id)))
+            .ToList()
+            .AsReadOnly();
     }
 
     /// <summary>
@@ -112,6 +135,8 @@ public class StudentService : IStudentService
     /// </summary>
     public async Task<StudentDto> RegisterAsync(RegisterStudentInput input, CancellationToken cancellationToken = default)
     {
+        await EnsurePlanBelongsToAcademyAsync(input.PlanId, input.AcademyId, cancellationToken);
+
         // Validação de email único — verificar ANTES de criar para evitar INSERT parcial
         if (await _users.EmailExistsAsync(input.Email, cancellationToken))
             throw new BusinessRuleException($"E-mail '{input.Email}' já está em uso.");
@@ -186,8 +211,12 @@ public class StudentService : IStudentService
             user.Email = input.Email;
         }
 
-        if (input.PlanId.HasValue) student.PlanId = input.PlanId.Value;
-        if (input.Active.HasValue) student.Active = input.Active.Value;
+        if (input.PlanId.HasValue)
+        {
+            await EnsurePlanBelongsToAcademyAsync(input.PlanId.Value, student.AcademyId, cancellationToken);
+            student.PlanId = input.PlanId.Value;
+        }
+        if (input.Active.HasValue) student.SetActive(input.Active.Value, DateTime.UtcNow);
 
         await _users.UpdateAsync(user, cancellationToken);
         await _students.UpdateAsync(student, cancellationToken);
@@ -250,7 +279,7 @@ public class StudentService : IStudentService
             s.EnrollmentDate,
             s.Active,
             s.Plan?.Name,                    // null se Plan não foi incluído no Include
-            latestPrediction);
+            latestPrediction) { CancelledAt = s.CancelledAt };
 
     /// <summary>Converte Prediction em PredictionDto sem dependências externas.</summary>
     private static PredictionDto MapPredictionToDto(Domain.Entities.Prediction p)

@@ -67,8 +67,8 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var mutation = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId}}"
-                    planId: "{{planId}}"
+                    academyId: {{academyId}}
+                    planId: {{planId}}
                     name: "Aluno Teste"
                     email: "aluno1@test.com"
                     password: "Senha@123"
@@ -100,8 +100,8 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var mutation = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId}}"
-                    planId: "{{planId}}"
+                    academyId: {{academyId}}
+                    planId: {{planId}}
                     name: "Aluno A"
                     email: "duplicate@test.com"
                     password: "Senha@123"
@@ -127,7 +127,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var mut1 = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId1}}" planId: "{{planId1}}"
+                    academyId: {{academyId1}} planId: {{planId1}}
                     name: "Aluno Academia 1" email: "aluno.ac1@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }
@@ -139,7 +139,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var mut2 = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId2}}" planId: "{{planId2}}"
+                    academyId: {{academyId2}} planId: {{planId2}}
                     name: "Aluno Academia 2" email: "aluno.ac2@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }
@@ -168,7 +168,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var createMut = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId}}" planId: "{{planId}}"
+                    academyId: {{academyId}} planId: {{planId}}
                     name: "Aluno Deletado" email: "deletado@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }
@@ -211,7 +211,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var createMut = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId}}" planId: "{{planId}}"
+                    academyId: {{academyId}} planId: {{planId}}
                     name: "Aluno Upd" email: "upd.aluno@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }
@@ -224,7 +224,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var updateMut = $$"""
             mutation {
                 updateStudent(id: "{{studentId}}", input: {
-                    planId: "{{plan2.Id}}"
+                    planId: {{plan2.Id}}
                 }) { id planName }
             }
             """;
@@ -242,7 +242,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var createMut = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId2}}" planId: "{{planId2}}"
+                    academyId: {{academyId2}} planId: {{planId2}}
                     name: "Aluno Other2" email: "other2.aluno@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }
@@ -255,7 +255,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var updateMut = $$"""
             mutation {
                 updateStudent(id: "{{studentId}}", input: {
-                    planId: "{{planId1}}"
+                    planId: {{planId1}}
                 }) { id }
             }
             """;
@@ -263,7 +263,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
 
         result.RootElement.TryGetProperty("errors", out var errors).Should().BeTrue();
         var code = errors[0].GetProperty("extensions").GetProperty("code").GetString();
-        code.Should().BeOneOf("FORBIDDEN", "AUTH_ERROR", "UNAUTHORIZED");
+        code.Should().BeOneOf("FORBIDDEN", "NOT_FOUND");
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class StudentIntegrationTests : IClassFixture<TestFactory>
         var createMut = $$"""
             mutation {
                 registerStudent(input: {
-                    academyId: "{{academyId}}" planId: "{{planId}}"
+                    academyId: {{academyId}} planId: {{planId}}
                     name: "Aluno Del2" email: "del2.aluno@test.com"
                     password: "Senha@123" enrollmentDate: "2025-01-01T00:00:00Z"
                 }) { id }

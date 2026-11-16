@@ -56,7 +56,7 @@ namespace ProjectVital.Infrastructure.Persistence.Configurations;
 /// QUANDO MUDAR ESTE ARQUIVO:
 ///   1. Qualquer mudança → rodar: dotnet ef migrations add <Nome>
 ///   2. Se alterar HasConversion: verificar que Python ainda retorna o mesmo valor de string
-///   3. Se alterar ModelVersion MaxLength: verificar formato em trainer.py (atualmente "rf_v{N}")
+///   3. Se alterar ModelVersion MaxLength: verificar formato em trainer.py (atualmente "xgb_v{N}")
 ///   4. Se alterar índice: verificar GetLatestByAcademyAsync em PredictionRepository
 /// </summary>
 public class PredictionConfiguration : IEntityTypeConfiguration<Prediction>
@@ -93,7 +93,7 @@ public class PredictionConfiguration : IEntityTypeConfiguration<Prediction>
                 v => (RiskLevel)Enum.Parse(typeof(RiskLevel), v, true)) // MySQL → C#: ignoreCase=true
             .HasMaxLength(10);
 
-        // ModelVersion — ex: "rf_v1.2" ou "xgb_v3.0"
+        // ModelVersion — ex: "xgb_v3"
         // Registra qual versão do modelo gerou esta predição (rastreabilidade)
         // SE O FORMATO MUDAR no trainer.py: MaxLength(50) ainda comporta versões mais longas
         builder.Property(p => p.ModelVersion)

@@ -1,5 +1,6 @@
 using HotChocolate;
 using HotChocolate.Types;
+using Microsoft.Extensions.DependencyInjection;
 using ProjectVital.Application.DTOs;
 using ProjectVital.Application.Interfaces;
 
@@ -14,7 +15,7 @@ namespace ProjectVital.API.GraphQL.Types;
 ///     studentId: ID!
 ///     probability: Float!     # 0.0 a 1.0
 ///     riskLevel: RiskLevel!   # enum: LOW | MEDIUM | HIGH
-///     modelVersion: String!   # ex: "rf_v1.2"
+///     modelVersion: String!   # ex: "xgb_v3"
 ///     predictedAt: DateTime!  # UTC
 ///   }
 ///
@@ -62,7 +63,7 @@ public class PredictionType : ObjectType<PredictionDto>
         // Mudar thresholds em RiskLevel.cs requer atualizar Python e frontend também.
         descriptor.Field(p => p.RiskLevel).Type<NonNullType<EnumType<Domain.Enums.RiskLevel>>>();
 
-        // Formato: "rf_v1.2" ou "xgb_v2.0". Permite rastrear qual modelo gerou a predição.
+        // Formato: "xgb_v{N}" (N = versão do treino da academia). Permite rastrear qual modelo gerou a predição.
         // Pode ser "" em predições batch — limitação conhecida.
         descriptor.Field(p => p.ModelVersion).Type<NonNullType<StringType>>();
 
@@ -71,11 +72,19 @@ public class PredictionType : ObjectType<PredictionDto>
 
         // Campo resolvido via StudentService — inclui dados do aluno na predição.
         // N+1 mitigado pelo tamanho pequeno dos datasets (TD-03: DataLoader é o fix correto).
+        //
+        // CONCORRÊNCIA: numa lista `predictions { student }`, o Hot Chocolate executa
+        // este resolver N vezes EM PARALELO. Usar o IStudentService do scope do request
+        // (DbContext compartilhado) causaria "A second operation was started on this context".
+        // Por isso criamos um DI scope dedicado por invocação → DbContext isolado.
+        // IServiceScopeFactory é singleton; o `using` vive durante o await; GetByIdAsync
+        // retorna um DTO materializado (AsNoTracking), então não há lazy-load pós-dispose.
         descriptor.Field("student")
             .Resolve(async (ctx, ct) =>
             {
                 var pred = ctx.Parent<PredictionDto>();
-                var studentService = ctx.Service<IStudentService>();
+                using var scope = ctx.Service<IServiceScopeFactory>().CreateScope();
+                var studentService = scope.ServiceProvider.GetRequiredService<IStudentService>();
                 return await studentService.GetByIdAsync(pred.StudentId, ct);
             })
             .Type<StudentType>();

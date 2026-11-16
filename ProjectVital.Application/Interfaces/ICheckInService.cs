@@ -44,6 +44,9 @@ public interface ICheckInService
     /// </summary>
     Task<CheckInDto> RegisterAsync(int studentId, CancellationToken cancellationToken = default);
 
+    /// <summary>Registra a SAÍDA: completa a entrada aberta com o tempo de permanência.</summary>
+    Task<CheckInDto> CheckOutAsync(int studentId, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Lista check-ins de um aluno em um intervalo de datas opcional.
     ///

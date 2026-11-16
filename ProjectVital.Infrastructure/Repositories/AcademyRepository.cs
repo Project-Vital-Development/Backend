@@ -40,7 +40,10 @@ public class AcademyRepository : Repository<Academy>, IAcademyRepository
     /// </summary>
     public async Task<Academy?> GetByManagerIdAsync(int managerId, CancellationToken cancellationToken = default)
     {
+        // Usado no LOGIN, antes de existir academia no token: o filtro de tenant
+        // esconderia a academia. Seguro porque busca pelo gestor já autenticado por senha.
         return await Set
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .FirstOrDefaultAsync(a => a.ManagerId == managerId, cancellationToken);
     }
